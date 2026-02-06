@@ -744,15 +744,15 @@ async function renderResultsContent(week) {
         return `
             <div class="result-item ${hasGuesses ? (allCorrect ? 'correct' : 'incorrect') : ''}">
                 <h4>${albumGroup.album} - ${albumGroup.artist}</h4>
-                <p><strong>Submitted by:</strong> ${actualSubmitters.join(', ')}</p>
-                ${isDuplicate ? `<p style="color: #00a8cc; font-weight: 600; margin-top: 5px;">✓ This was the duplicate album (submitted by ${actualSubmitters.length} person(s))</p>` : ''}
                 ${hasGuesses ? `
+                    <p><strong>Submitted by:</strong> ${actualSubmitters.join(', ')}</p>
+                    ${isDuplicate ? `<p style="color: #00a8cc; font-weight: 600; margin-top: 5px;">✓ This was the duplicate album (submitted by ${actualSubmitters.length} person(s))</p>` : ''}
                     <p><strong>Your guesses:</strong> ${guessedSubmitters.length > 0 ? guessedSubmitters.join(', ') : 'None'}</p>
                     <p><strong>Correct:</strong> ${correctGuesses.length > 0 ? '✓ ' + correctGuesses.join(', ') : 'None'}</p>
                     ${incorrectGuesses.length > 0 ? `<p><strong>Incorrect guesses:</strong> ✗ ${incorrectGuesses.join(', ')}</p>` : ''}
                     ${missedSubmitters.length > 0 ? `<p><strong>Missed:</strong> ${missedSubmitters.join(', ')}</p>` : ''}
                     <p><strong>Result:</strong> ${resultMessage}</p>
-                ` : '<p>You did not guess this album.</p>'}
+                ` : '<p>You have not guessed this album yet. Make your guesses on the Guess page to see results.</p>'}
                 ${albumGroup.url ? `<p><a href="${albumGroup.url}" target="_blank">${albumGroup.url}</a></p>` : ''}
             </div>
         `;
@@ -941,13 +941,10 @@ async function renderPlaylistPage() {
                 <div class="alert alert-info" style="margin-bottom: 30px;">
                     <h3 style="margin-bottom: 10px;">Create Playlist</h3>
                     <p style="margin-bottom: 15px;">
-                        Click the button below to open Spotify and create a playlist with all ${spotifyIds.length} albums that have Spotify URLs.
+                        Use the "Open in Spotify" buttons below each album to add them to a playlist. Spotify doesn't support bulk playlist creation via URL, so you'll need to add albums one by one.
                     </p>
-                    <a href="${playlistUrl}" target="_blank" class="btn btn-success" style="text-decoration: none; display: inline-block;">
-                        🎵 Create Spotify Playlist
-                    </a>
                     <p style="margin-top: 10px; font-size: 0.9rem; color: #666666;">
-                        Note: Spotify may not support creating playlists with multiple albums directly. You may need to add albums one by one.
+                        <strong>Quick method:</strong> Click each "Open in Spotify" button, then use the "..." menu on each album page to add it to your playlist.
                     </p>
                 </div>
             ` : ''}
@@ -967,7 +964,7 @@ async function renderPlaylistPage() {
                                         ${spotifyAlbumUrl}
                                     </a>
                                 </div>
-                                <a href="${spotifyAlbumUrl}" target="_blank" class="btn" style="margin-left: 15px; text-decoration: none;">
+                                <a href="${spotifyAlbumUrl}" target="_blank" class="btn" style="margin-left: 15px; text-decoration: none; color: white !important;">
                                     Open in Spotify
                                 </a>
                             </div>
