@@ -171,22 +171,42 @@ async function renderPage(page) {
 async function renderSubmitPage() {
     const week = Storage.getCurrentWeek();
     const submissions = await Storage.getSubmissions(week);
+    const members = await Storage.getTeamMembers();
     const userSubmissions = submissions.filter(s => s.submitter === currentGuesser);
     const remaining = 2 - userSubmissions.length;
 
     return `
         <div class="page active">
             <h2 class="page-title">Submit Albums</h2>
+            ${members.length === 0 ? `
+                <div class="alert alert-info">
+                    <p>No team members have been added yet. Please ask an admin to add team members first.</p>
+                </div>
+            ` : ''}
             ${!currentGuesser ? `
                 <div class="form-group">
                     <label for="guesser-name">Your Name:</label>
-                    <input type="text" id="guesser-name" placeholder="Enter your name" required>
+                    <select id="guesser-name" required>
+                        <option value="">Select your name...</option>
+                        ${members.map(m => `
+                            <option value="${m}" ${m === currentGuesser ? 'selected' : ''}>${m}</option>
+                        `).join('')}
+                    </select>
                 </div>
             ` : `
                 <div class="submission-count">Submissions this week: ${userSubmissions.length}/2</div>
             `}
-            ${remaining > 0 ? `
+            ${remaining > 0 && members.length > 0 ? `
                 <form id="submit-form">
+                    <div class="form-group">
+                        <label for="submitter-name">Your Name:</label>
+                        <select id="submitter-name" required>
+                            <option value="">Select your name...</option>
+                            ${members.map(m => `
+                                <option value="${m}" ${m === currentGuesser ? 'selected' : ''}>${m}</option>
+                            `).join('')}
+                        </select>
+                    </div>
                     <div class="form-group">
                         <label for="artist">Artist Name:</label>
                         <input type="text" id="artist" placeholder="Enter artist name" required>
@@ -222,25 +242,57 @@ async function renderSubmitPage() {
 }
 
 function setupSubmitPage() {
+    // Handle name selection dropdown (outside form)
+    const guesserNameSelect = document.getElementById('guesser-name');
+    if (guesserNameSelect) {
+        guesserNameSelect.addEventListener('change', async (e) => {
+            const name = e.target.value.trim();
+            if (name) {
+                currentGuesser = name;
+                localStorage.setItem('currentGuesser', name);
+                await renderPage('submit');
+            }
+        });
+    }
+
+    // Handle name selection dropdown (inside form)
+    const submitterNameSelect = document.getElementById('submitter-name');
+    if (submitterNameSelect) {
+        submitterNameSelect.addEventListener('change', async (e) => {
+            const name = e.target.value.trim();
+            if (name && name !== currentGuesser) {
+                currentGuesser = name;
+                localStorage.setItem('currentGuesser', name);
+                await renderPage('submit');
+            }
+        });
+    }
+
     const form = document.getElementById('submit-form');
     if (form) {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const guesserNameInput = document.getElementById('guesser-name');
-            if (guesserNameInput && !currentGuesser) {
-                const name = guesserNameInput.value.trim();
-                if (!name) {
-                    showMessage('submit-message', 'Please enter your name.', 'error');
-                    return;
-                }
-                currentGuesser = name;
-                localStorage.setItem('currentGuesser', name);
+            // Get name from either the top dropdown or the form dropdown
+            let submitterName = '';
+            const guesserNameSelect = document.getElementById('guesser-name');
+            const submitterNameSelect = document.getElementById('submitter-name');
+            
+            if (guesserNameSelect) {
+                submitterName = guesserNameSelect.value.trim();
+            } else if (submitterNameSelect) {
+                submitterName = submitterNameSelect.value.trim();
             }
-
-            if (!currentGuesser) {
-                showMessage('submit-message', 'Please enter your name.', 'error');
+            
+            if (!submitterName) {
+                showMessage('submit-message', 'Please select your name.', 'error');
                 return;
+            }
+            
+            // Update currentGuesser if it changed
+            if (submitterName !== currentGuesser) {
+                currentGuesser = submitterName;
+                localStorage.setItem('currentGuesser', submitterName);
             }
 
             const artist = document.getElementById('artist').value.trim();
@@ -258,7 +310,7 @@ function setupSubmitPage() {
             submitBtn.textContent = 'Submitting...';
 
             try {
-                const result = await Storage.addSubmission(artist, album, url, currentGuesser);
+                const result = await Storage.addSubmission(artist, album, url, submitterName);
                 
                 if (result.success) {
                     showMessage('submit-message', result.message, 'success');
