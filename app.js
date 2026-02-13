@@ -336,7 +336,8 @@ async function renderGuessPage() {
     const week = Storage.getCurrentWeek();
     const submissions = await Storage.getSubmissions(week);
     const guesses = await Storage.getGuesses(week);
-    const members = await Storage.getTeamMembers();
+    // Only show people who submitted at least one album this week
+    const submittersThisWeek = [...new Set(submissions.map(s => s.submitter))];
 
     if (submissions.length === 0) {
         return `
@@ -345,6 +346,33 @@ async function renderGuessPage() {
                 <div class="empty-state">
                     <p>No albums submitted yet this week.</p>
                 </div>
+            </div>
+        `;
+    }
+
+    // Don't show albums/guess form until this user has submitted at least one album this week
+    const userSubmittedThisWeek = currentGuesser && submissions.some(s => s.submitter === currentGuesser);
+    if (!currentGuesser) {
+        return `
+            <div class="page active">
+                <h2 class="page-title">Guess</h2>
+                <div class="form-group">
+                    <label for="guesser-name-guess">Your Name:</label>
+                    <input type="text" id="guesser-name-guess" placeholder="Enter your name" required>
+                </div>
+                <p style="color: #666666; margin-top: 15px;">Enter your name to continue.</p>
+                <div id="guess-message"></div>
+            </div>
+        `;
+    }
+    if (!userSubmittedThisWeek) {
+        return `
+            <div class="page active">
+                <h2 class="page-title">Guess</h2>
+                <div class="empty-state">
+                    <p>Submit at least one album this week to make guesses.</p>
+                </div>
+                <div id="guess-message"></div>
             </div>
         `;
     }
@@ -390,14 +418,8 @@ async function renderGuessPage() {
     });
 
     return `
-        <div class="page active">
+        <div class="page active" data-guesses-finalized="${guessesFinalized}">
             <h2 class="page-title">Guess Who Submitted What</h2>
-            ${!currentGuesser ? `
-                <div class="form-group">
-                    <label for="guesser-name-guess">Your Name:</label>
-                    <input type="text" id="guesser-name-guess" placeholder="Enter your name" required>
-                </div>
-            ` : ''}
             ${guessesFinalized ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
                     <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.</p>
@@ -406,9 +428,13 @@ async function renderGuessPage() {
             ${hasDuplicates ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
                     <p style="margin-bottom: 0;"><strong>Note:</strong> One album in this week was submitted by ${maxDuplicateCount} team member(s). 
-                    You can select up to ${maxDuplicateCount} people on ONE album if you think it's the duplicate. All other albums should have only one selection.</p>
+                    You can select up to ${maxDuplicateCount} people on ONE album if you think it's the duplicate. All other albums should have only one selection. You can select each person at most twice in total.</p>
                 </div>
-            ` : ''}
+            ` : `
+                <div class="alert alert-info" style="margin-bottom: 30px;">
+                    <p style="margin-bottom: 0;">You can select each person at most twice in total across all albums.</p>
+                </div>
+            `}
             ${uniqueAlbums.map(albumGroup => {
                 const existingGuesses = existingGuessesByAlbum[albumGroup.key] || [];
                 const useRadioButtons = !hasDuplicates;
@@ -416,7 +442,6 @@ async function renderGuessPage() {
                     <div class="album-card">
                         <h3>${albumGroup.album}</h3>
                         <p><strong>Artist:</strong> ${albumGroup.artist}</p>
-                        ${albumGroup.url ? `<p><a href="${albumGroup.url}" target="_blank">${albumGroup.url}</a></p>` : ''}
                         <div class="guess-form">
                             <label>Who submitted this? ${useRadioButtons ? '(Select one)' : `(Select up to ${maxDuplicateCount}, only one album can have multiple)`}</label>
                             <div class="guess-options" 
@@ -424,7 +449,7 @@ async function renderGuessPage() {
                                  data-use-radio="${useRadioButtons}" 
                                  data-max-selections="${maxDuplicateCount}"
                                  style="margin-top: 10px;">
-                                ${members.map(m => {
+                                ${submittersThisWeek.map(m => {
                                     const isSelected = existingGuesses.includes(m);
                                     const inputType = useRadioButtons ? 'radio' : 'checkbox';
                                     const inputName = useRadioButtons ? `guess-${albumGroup.key}` : '';
@@ -456,6 +481,8 @@ async function renderGuessPage() {
 }
 
 function setupGuessPage() {
+    const guessGroups = document.querySelectorAll('.guess-options');
+
     const guesserNameInput = document.getElementById('guesser-name-guess');
     if (guesserNameInput) {
         guesserNameInput.addEventListener('change', async (e) => {
@@ -472,8 +499,6 @@ function setupGuessPage() {
                 showMessage('guess-message', 'Please enter your name first.', 'error');
                 return;
             }
-
-            const guessGroups = document.querySelectorAll('.guess-options');
             let totalGuesses = 0;
             let albumsWithNoSelection = [];
 
@@ -521,72 +546,64 @@ function setupGuessPage() {
                 return;
             }
 
+            // Collect all guesses to save first
+            const guessesToSave = [];
+            for (const group of guessGroups) {
+                const albumKey = group.getAttribute('data-album-key');
+                const useRadio = group.getAttribute('data-use-radio') === 'true';
+                
+                if (useRadio) {
+                    const selected = group.querySelector('input[type="radio"]:checked');
+                    if (selected) {
+                        guessesToSave.push({ albumKey, guessedSubmitter: selected.value });
+                        totalGuesses++;
+                    }
+                } else {
+                    const checkedBoxes = group.querySelectorAll('input[type="checkbox"]:checked');
+                    for (const checkbox of checkedBoxes) {
+                        guessesToSave.push({ albumKey, guessedSubmitter: checkbox.value });
+                        totalGuesses++;
+                    }
+                }
+            }
+
+            // Validate: no person selected more than twice across all albums
+            const countByPerson = {};
+            for (const g of guessesToSave) {
+                countByPerson[g.guessedSubmitter] = (countByPerson[g.guessedSubmitter] || 0) + 1;
+            }
+            const overSelected = Object.entries(countByPerson).find(([, count]) => count > 2);
+            if (overSelected) {
+                showMessage('guess-message', `You can select each person at most twice. "${overSelected[0]}" is selected ${overSelected[1]} times.`, 'error');
+                return;
+            }
+
             if (confirm('Are you sure you want to save and finalize your guesses? You will not be able to change them after this.')) {
                 saveBtn.disabled = true;
                 saveBtn.textContent = 'Saving...';
 
                 try {
-                    // First, clear all existing guesses for this user/week (before finalizing check)
                     const week = Storage.getCurrentWeek();
+                    // Fetch latest data right before modifying to avoid overwriting another user's guesses
                     const data = await Storage.getData();
-                    if (data.guesses && data.guesses[week]) {
-                        data.guesses[week] = data.guesses[week].filter(g => g.guesser !== currentGuesser || !g.albumKey);
-                        const saveResult = await Storage.saveData(data);
-                        if (!saveResult || !saveResult.success) {
-                            throw new Error('Failed to clear existing guesses');
-                        }
+                    if (!data.guesses) data.guesses = {};
+                    if (!data.guesses[week]) data.guesses[week] = [];
+                    // Remove only this guesser's guesses for this week (keep everyone else's)
+                    data.guesses[week] = data.guesses[week].filter(g => g.guesser !== currentGuesser || !g.albumKey);
+                    // Add this user's new guesses
+                    for (const g of guessesToSave) {
+                        data.guesses[week].push({
+                            albumKey: g.albumKey,
+                            guesser: currentGuesser,
+                            guessedSubmitter: g.guessedSubmitter,
+                            week
+                        });
+                    }
+                    const saveResult = await Storage.saveData(data);
+                    if (!saveResult || !saveResult.success) {
+                        throw new Error('Failed to save guesses');
                     }
 
-                    // Collect all guesses to save first
-                    const guessesToSave = [];
-                    for (const group of guessGroups) {
-                        const albumKey = group.getAttribute('data-album-key');
-                        const useRadio = group.getAttribute('data-use-radio') === 'true';
-                        
-                        if (useRadio) {
-                            // Radio buttons - single selection
-                            const selected = group.querySelector('input[type="radio"]:checked');
-                            if (selected) {
-                                guessesToSave.push({ albumKey, guessedSubmitter: selected.value });
-                                totalGuesses++;
-                            }
-                        } else {
-                            // Checkboxes - multiple selections
-                            const checkedBoxes = group.querySelectorAll('input[type="checkbox"]:checked');
-                            
-                            for (const checkbox of checkedBoxes) {
-                                guessesToSave.push({ albumKey, guessedSubmitter: checkbox.value });
-                                totalGuesses++;
-                            }
-                        }
-                    }
-
-                    // Save all guesses in sequence and verify each save completes
-                    for (const guess of guessesToSave) {
-                        try {
-                            await Storage.saveGuessForAlbum(guess.albumKey, currentGuesser, guess.guessedSubmitter, true);
-                            // Small delay between saves to ensure they complete
-                            await new Promise(resolve => setTimeout(resolve, 50));
-                        } catch (saveError) {
-                            console.error('Error saving individual guess:', saveError);
-                            throw new Error(`Failed to save guess: ${saveError.message}`);
-                        }
-                    }
-
-                    // Verify all guesses were saved by reading them back
-                    const verifyData = await Storage.getData();
-                    const weekGuesses = verifyData.guesses?.[week] || [];
-                    const savedCount = weekGuesses.filter(g => 
-                        g.guesser === currentGuesser && 
-                        g.albumKey && 
-                        guessesToSave.some(gs => gs.albumKey === g.albumKey && gs.guessedSubmitter === g.guessedSubmitter)
-                    ).length;
-
-                    if (savedCount !== guessesToSave.length) {
-                        throw new Error(`Only ${savedCount} of ${guessesToSave.length} guesses were saved. Please try again.`);
-                    }
-
-                    // Only finalize after all guesses are verified as saved
                     await Storage.finalizeGuesses(currentGuesser);
                     
                     showMessage('guess-message', `Saved and finalized ${totalGuesses} guess(es)!`, 'success');
@@ -603,8 +620,41 @@ function setupGuessPage() {
         });
     }
 
+    // Count how many times each person is selected across all albums; enforce max 2 per person
+    function getSelectionCountByPerson() {
+        const count = {};
+        guessGroups.forEach(group => {
+            const useRadio = group.getAttribute('data-use-radio') === 'true';
+            const inputs = group.querySelectorAll(useRadio ? 'input[type="radio"]:checked' : 'input[type="checkbox"]:checked');
+            inputs.forEach(input => {
+                const name = input.value;
+                count[name] = (count[name] || 0) + 1;
+            });
+        });
+        return count;
+    }
+
+    function updateMaxTwoPerPersonState() {
+        const countByPerson = getSelectionCountByPerson();
+        guessGroups.forEach(group => {
+            const useRadio = group.getAttribute('data-use-radio') === 'true';
+            const inputs = group.querySelectorAll(useRadio ? 'input[type="radio"]' : 'input[type="checkbox"]');
+            inputs.forEach(input => {
+                const name = input.value;
+                const total = countByPerson[name] || 0;
+                const alreadySelectedHere = input.checked;
+                input.disabled = guessesFinalized;
+                if (!guessesFinalized && !alreadySelectedHere && total >= 2) {
+                    input.disabled = true;
+                }
+            });
+        });
+    }
+
+    const guessesFinalized = document.querySelector('.page.active')?.getAttribute('data-guesses-finalized') === 'true';
+    updateMaxTwoPerPersonState();
+
     // Auto-save on change (only if not finalized) - for checkboxes only (radio buttons handled on save)
-    const guessGroups = document.querySelectorAll('.guess-options');
     const hasDuplicates = document.querySelector('.guess-options[data-use-radio="false"]') !== null;
     
     guessGroups.forEach(group => {
@@ -639,16 +689,21 @@ function setupGuessPage() {
                                 showMessage('guess-message', `You can only select up to ${maxSelections} people on one album.`, 'error');
                                 return;
                             }
-                            
+                            // Check max 2 per person across all albums
+                            const countByPerson = getSelectionCountByPerson();
+                            if (countByPerson[checkbox.value] > 2) {
+                                checkbox.checked = false;
+                                showMessage('guess-message', 'You can select each person at most twice across all albums.', 'error');
+                                return;
+                            }
                             // If this album now has multiple selections, ensure no other album has multiple
                             if (checkedInThisAlbum > 1 && albumsWithMultiple > 0) {
                                 checkbox.checked = false;
                                 showMessage('guess-message', 'Only one album can have multiple selections. Uncheck selections on other albums first.', 'error');
                                 return;
                             }
-                        } else {
-                            // When unchecking, no validation needed
                         }
+                        updateMaxTwoPerPersonState();
                         
                         try {
                             const albumKey = group.getAttribute('data-album-key');
@@ -660,18 +715,27 @@ function setupGuessPage() {
                             }
                         } catch (error) {
                             showMessage('guess-message', error.message, 'error');
-                            // Uncheck/check the box if there was an error
                             checkbox.checked = !checkbox.checked;
+                            updateMaxTwoPerPersonState();
                         }
                     }
                 });
             });
         } else if (!useRadio) {
-            // Regular checkboxes without duplicate restrictions
+            // Regular checkboxes - still enforce max 2 per person
             const checkboxes = group.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(checkbox => {
                 checkbox.addEventListener('change', async () => {
                     if (currentGuesser && !checkbox.disabled) {
+                        if (checkbox.checked) {
+                            const countByPerson = getSelectionCountByPerson();
+                            if (countByPerson[checkbox.value] > 2) {
+                                checkbox.checked = false;
+                                showMessage('guess-message', 'You can select each person at most twice across all albums.', 'error');
+                                return;
+                            }
+                        }
+                        updateMaxTwoPerPersonState();
                         try {
                             const albumKey = group.getAttribute('data-album-key');
                             const guessedSubmitter = checkbox.value;
@@ -683,8 +747,17 @@ function setupGuessPage() {
                         } catch (error) {
                             showMessage('guess-message', error.message, 'error');
                             checkbox.checked = !checkbox.checked;
+                            updateMaxTwoPerPersonState();
                         }
                     }
+                });
+            });
+        } else {
+            // Radio buttons - enforce max 2 per person on change
+            const radios = group.querySelectorAll('input[type="radio"]');
+            radios.forEach(radio => {
+                radio.addEventListener('change', () => {
+                    updateMaxTwoPerPersonState();
                 });
             });
         }
