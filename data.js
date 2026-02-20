@@ -641,15 +641,12 @@ const Storage = {
             albumGroups[key].actualSubmitters.push(sub.submitter);
         });
 
-        // Calculate total number of submissions (not unique albums)
-        const totalSubmissions = submissions.length;
-
-        // Calculate scores based on album groups
+        // Calculate scores: only count albums a member actually guessed (total = their attempts)
         const scores = {};
         members.forEach(member => {
             scores[member] = {
                 correct: 0,
-                total: totalSubmissions, // Total is the number of submissions in the week
+                total: 0, // Set later for guessers: number of albums they guessed
                 submissions: submissions.filter(s => s.submitter === member).length
             };
         });
@@ -674,12 +671,14 @@ const Storage = {
             }
         });
 
-        // Calculate scores for each guesser
+        // Calculate scores for each guesser (total = albums they guessed; non-guessers stay 0/0)
         Object.keys(guessesByGuesserAndAlbum).forEach(guesser => {
             if (!scores[guesser]) {
-                scores[guesser] = { correct: 0, total: totalSubmissions, submissions: 0 };
+                scores[guesser] = { correct: 0, total: 0, submissions: submissions.filter(s => s.submitter === guesser).length };
             }
-            
+            const albumsGuessed = Object.keys(guessesByGuesserAndAlbum[guesser]).length;
+            scores[guesser].total = albumsGuessed;
+
             Object.keys(guessesByGuesserAndAlbum[guesser]).forEach(albumKey => {
                 const albumGroup = albumGroups[albumKey];
                 if (albumGroup) {
@@ -726,7 +725,8 @@ const Storage = {
             const uniqueWeekMembers = [...new Set(weekMembers)];
 
             members.forEach(member => {
-                if (results.scores[member]) {
+                // Only add guess stats and weeksPlayed when they actually made guesses that week
+                if (results.scores[member] && results.scores[member].total > 0) {
                     stats[member].totalCorrect += results.scores[member].correct;
                     stats[member].totalGuesses += results.scores[member].total;
                     stats[member].weeksPlayed++;

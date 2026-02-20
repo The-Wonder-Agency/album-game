@@ -90,6 +90,11 @@ async function checkUrlParameters() {
     }
 }
 
+function isBeforeMidday() {
+    const now = new Date();
+    return now.getHours() < 12;
+}
+
 function updateNavigationVisibility() {
     const settingsBtn = document.querySelector('.nav-btn[data-page="settings"]');
     if (settingsBtn) {
@@ -97,6 +102,17 @@ function updateNavigationVisibility() {
             settingsBtn.style.display = '';
         } else {
             settingsBtn.style.display = 'none';
+        }
+    }
+
+    const guessBtn = document.querySelector('.nav-btn[data-page="guess"]');
+    if (guessBtn) {
+        if (isBeforeMidday()) {
+            guessBtn.disabled = true;
+            guessBtn.title = 'Available from midday';
+        } else {
+            guessBtn.disabled = false;
+            guessBtn.removeAttribute('title');
         }
     }
 }
@@ -112,8 +128,14 @@ function setupNavigation() {
 }
 
 async function navigateToPage(page) {
+    updateNavigationVisibility();
+
+    if (page === 'guess' && isBeforeMidday()) {
+        return; // Guess button is disabled, but guard in case of hash/navigation
+    }
+
     currentPage = page;
-    
+
     // Update active nav button
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-page') === page);
@@ -133,8 +155,19 @@ async function renderPage(page) {
                 setupSubmitPage();
                 break;
             case 'guess':
-                mainContent.innerHTML = await renderGuessPage();
-                setupGuessPage();
+                if (isBeforeMidday()) {
+                    mainContent.innerHTML = `
+                        <div class="page active">
+                            <h2 class="page-title">Guess</h2>
+                            <div class="empty-state">
+                                <p>Guessing opens at midday. Check back later!</p>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    mainContent.innerHTML = await renderGuessPage();
+                    setupGuessPage();
+                }
                 break;
             case 'results':
                 mainContent.innerHTML = await renderResultsPage();
@@ -883,8 +916,8 @@ async function renderResultsContent(week) {
         `;
     }).join('');
 
-    // Calculate leaderboard
-    const leaderboard = Object.entries(results.scores)
+    // Calculate leaderboard (with ties: same score = same rank, no highlight when tied)
+    const leaderboardSorted = Object.entries(results.scores)
         .filter(([member, score]) => score.total > 0)
         .map(([member, score]) => ({
             member,
@@ -896,16 +929,33 @@ async function renderResultsContent(week) {
             if (b.correct !== a.correct) return b.correct - a.correct;
             return b.percentage - a.percentage;
         });
+    const leaderboard = addLeaderboardRanks(leaderboardSorted, e => `${e.correct}-${e.total}-${e.percentage}`);
+    const firstPlace = leaderboard.filter(e => e.rank === 1);
+    const restPlace = leaderboard.filter(e => e.rank > 1);
 
     const leaderboardHtml = leaderboard.length > 0 ? `
         <div class="leaderboard">
             <h3 style="margin-top: 30px; margin-bottom: 20px;">Weekly Leaderboard</h3>
-            ${leaderboard.map((entry, index) => `
-                <div class="leaderboard-item rank-${index + 1}">
-                    <span><strong>#${index + 1}</strong> ${entry.member}</span>
-                    <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+            ${firstPlace.length > 0 ? `
+                <div class="leaderboard-first-row">
+                    ${firstPlace.map((entry) => `
+                        <div class="leaderboard-item ${entry.rankClass}">
+                            <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
+                            <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                        </div>
+                    `).join('')}
                 </div>
-            `).join('')}
+            ` : ''}
+            ${restPlace.length > 0 ? `
+                <div class="leaderboard-rest-grid ${restPlace.length === 2 ? 'rest-count-2' : ''}">
+                    ${restPlace.map((entry) => `
+                        <div class="leaderboard-item ${entry.rankClass}">
+                            <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
+                            <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
         </div>
     ` : '';
 
@@ -935,8 +985,8 @@ async function renderStatsPage() {
         `;
     }
 
-    // Overall leaderboard
-    const overallLeaderboard = members
+    // Overall leaderboard (with ties: same score = same rank, no highlight when tied)
+    const overallSorted = members
         .map(member => ({
             member,
             ...stats[member],
@@ -948,6 +998,7 @@ async function renderStatsPage() {
             if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
             return parseFloat(b.accuracy) - parseFloat(a.accuracy);
         });
+    const overallLeaderboard = addLeaderboardRanks(overallSorted, e => `${e.totalCorrect}-${e.totalGuesses}-${e.accuracy}`);
 
     // Week-by-week stats
     const weekStats = [];
@@ -966,30 +1017,39 @@ async function renderStatsPage() {
             <div class="stats-grid">
                 <div class="stat-card">
                     <h3>Overall Leaderboard</h3>
-                    ${overallLeaderboard.map((entry, index) => `
-                        <div class="leaderboard-item rank-${index < 3 ? index + 1 : ''}">
-                            <span><strong>#${index + 1}</strong> ${entry.member}</span>
-                            <span>${entry.totalCorrect}/${entry.totalGuesses} (${entry.accuracy}%)</span>
-                        </div>
-                    `).join('')}
-                </div>
-
-                <div class="stat-card">
-                    <h3>Participation</h3>
-                    ${members.map(member => `
-                        <div style="margin-bottom: 15px;">
-                            <strong>${member}</strong><br>
-                            <small>Weeks played: ${stats[member].weeksPlayed}</small><br>
-                            <small>Weeks submitted: ${stats[member].weeksSubmitted}</small><br>
-                            <small>Total submissions: ${stats[member].totalSubmissions}</small>
-                        </div>
-                    `).join('')}
+                    ${(() => {
+                        const firstPlace = overallLeaderboard.filter(e => e.rank === 1);
+                        const restPlace = overallLeaderboard.filter(e => e.rank > 1);
+                        return `
+                            ${firstPlace.length > 0 ? `
+                                <div class="leaderboard-first-row">
+                                    ${firstPlace.map((entry) => `
+                                        <div class="leaderboard-item ${entry.rankClass}">
+                                            <span><strong>${entry.displayRank}</strong> ${entry.member}<small class="leaderboard-weeks-played"> ${entry.weeksPlayed || 0} weeks played</small></span>
+                                            <span>${entry.totalCorrect}/${entry.totalGuesses} (${entry.accuracy}%)</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                            ${restPlace.length > 0 ? `
+                                <div class="leaderboard-rest-grid ${restPlace.length === 2 ? 'rest-count-2' : ''}">
+                                    ${restPlace.map((entry) => `
+                                        <div class="leaderboard-item ${entry.rankClass}">
+                                            <span><strong>${entry.displayRank}</strong> ${entry.member}<small class="leaderboard-weeks-played"> ${entry.weeksPlayed || 0} weeks played</small></span>
+                                            <span>${entry.totalCorrect}/${entry.totalGuesses} (${entry.accuracy}%)</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                        `;
+                    })()}
                 </div>
             </div>
 
             <h3 style="margin-top: 40px;">Week-by-Week Performance</h3>
+            <div class="week-by-week-grid">
             ${weekStats.map(weekStat => {
-                const weekLeaderboard = Object.entries(weekStat.results)
+                const weekLeaderboardSorted = Object.entries(weekStat.results)
                     .filter(([member, score]) => score.total > 0)
                     .map(([member, score]) => ({
                         member,
@@ -1001,21 +1061,39 @@ async function renderStatsPage() {
                         if (b.correct !== a.correct) return b.correct - a.correct;
                         return b.percentage - a.percentage;
                     });
+                const weekLeaderboard = addLeaderboardRanks(weekLeaderboardSorted, e => `${e.correct}-${e.total}-${e.percentage}`);
+                const firstPlace = weekLeaderboard.filter(e => e.rank === 1);
+                const restPlace = weekLeaderboard.filter(e => e.rank > 1);
 
                 return `
-                    <div class="stat-card" style="margin-top: 20px;">
+                    <div class="stat-card week-card">
                         <h3>Week of ${weekStat.week}</h3>
                         ${weekLeaderboard.length > 0 ? `
-                            ${weekLeaderboard.map((entry, index) => `
-                                <div class="leaderboard-item rank-${index < 3 ? index + 1 : ''}">
-                                    <span><strong>#${index + 1}</strong> ${entry.member}</span>
-                                    <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                            ${firstPlace.length > 0 ? `
+                                <div class="leaderboard-first-row ${firstPlace.length > 1 ? 'first-row-multi' : ''}">
+                                    ${firstPlace.map((entry) => `
+                                        <div class="leaderboard-item ${entry.rankClass}">
+                                            <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
+                                            ${firstPlace.length > 1 ? `<span class="leaderboard-score-under">${entry.correct}/${entry.total} (${entry.percentage}%)</span>` : `<span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>`}
+                                        </div>
+                                    `).join('')}
                                 </div>
-                            `).join('')}
+                            ` : ''}
+                            ${restPlace.length > 0 ? `
+                                <div class="leaderboard-rest-grid ${restPlace.length === 2 ? 'rest-count-2' : ''} ${restPlace.length > 3 ? 'rest-stack' : ''}">
+                                    ${restPlace.map((entry) => `
+                                        <div class="leaderboard-item ${entry.rankClass}">
+                                            <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
+                                            <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
                         ` : '<p>No guesses recorded for this week.</p>'}
                     </div>
                 `;
             }).join('')}
+            </div>
         </div>
     `;
 }
@@ -1552,6 +1630,29 @@ function setupSettingsPage() {
             }
         });
     }
+}
+
+// Utility: add ranks with ties; first place always gets gold; display #1, #2, =1, =2, ...
+function addLeaderboardRanks(sortedLeaderboard, getScoreKey) {
+    const result = [];
+    let currentRank = 1;
+    for (let i = 0; i < sortedLeaderboard.length; i++) {
+        const entry = sortedLeaderboard[i];
+        const prev = i > 0 ? sortedLeaderboard[i - 1] : null;
+        const tiedWithPrev = prev && getScoreKey(entry) === getScoreKey(prev);
+        if (!tiedWithPrev) currentRank = i + 1;
+        result.push({ ...entry, rank: currentRank });
+    }
+    const rankCounts = {};
+    result.forEach(r => { rankCounts[r.rank] = (rankCounts[r.rank] || 0) + 1; });
+    return result.map(r => {
+        const tied = rankCounts[r.rank] > 1;
+        return {
+            ...r,
+            displayRank: tied ? `=${r.rank}` : `#${r.rank}`,
+            rankClass: r.rank === 1 ? 'rank-1' : (r.rank <= 3 && rankCounts[r.rank] === 1) ? `rank-${r.rank}` : ''
+        };
+    });
 }
 
 // Utility function
