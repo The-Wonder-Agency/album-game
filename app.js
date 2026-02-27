@@ -34,7 +34,7 @@ async function initializeApp() {
     }
 
     // Update navigation visibility
-    updateNavigationVisibility();
+    await updateNavigationVisibility();
 }
 
 // Check URL parameters for Gist setup
@@ -95,7 +95,7 @@ function isBeforeMidday() {
     return now.getHours() < 12;
 }
 
-function updateNavigationVisibility() {
+async function updateNavigationVisibility() {
     const settingsBtn = document.querySelector('.nav-btn[data-page="settings"]');
     if (settingsBtn) {
         if (Storage.isAdminLoggedIn()) {
@@ -115,6 +115,30 @@ function updateNavigationVisibility() {
             guessBtn.removeAttribute('title');
         }
     }
+
+    const resultsBtn = document.querySelector('.nav-btn[data-page="results"]');
+    if (resultsBtn) {
+        if (isBeforeMidday()) {
+            resultsBtn.disabled = true;
+            resultsBtn.title = 'Available from midday';
+        } else {
+            resultsBtn.disabled = false;
+            resultsBtn.removeAttribute('title');
+        }
+    }
+
+    const playlistBtn = document.querySelector('.nav-btn[data-page="playlist"]');
+    if (playlistBtn) {
+        const week = Storage.getCurrentWeek();
+        const submissions = await Storage.getSubmissions(week);
+        if (submissions.length < 6) {
+            playlistBtn.disabled = true;
+            playlistBtn.title = `Available once 6 albums are submitted (${submissions.length}/6)`;
+        } else {
+            playlistBtn.disabled = false;
+            playlistBtn.removeAttribute('title');
+        }
+    }
 }
 
 function setupNavigation() {
@@ -128,10 +152,20 @@ function setupNavigation() {
 }
 
 async function navigateToPage(page) {
-    updateNavigationVisibility();
+    await updateNavigationVisibility();
 
     if (page === 'guess' && isBeforeMidday()) {
         return; // Guess button is disabled, but guard in case of hash/navigation
+    }
+    if (page === 'results' && isBeforeMidday()) {
+        return; // Results button is disabled, but guard in case of hash/navigation
+    }
+    if (page === 'playlist') {
+        const week = Storage.getCurrentWeek();
+        const submissions = await Storage.getSubmissions(week);
+        if (submissions.length < 6) {
+            return; // Playlist requires at least 6 submissions
+        }
     }
 
     currentPage = page;
@@ -170,15 +204,41 @@ async function renderPage(page) {
                 }
                 break;
             case 'results':
-                mainContent.innerHTML = await renderResultsPage();
-                await setupResultsPage();
+                if (isBeforeMidday()) {
+                    mainContent.innerHTML = `
+                        <div class="page active">
+                            <h2 class="page-title">Results</h2>
+                            <div class="empty-state">
+                                <p>Results are available from midday. Check back later!</p>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    mainContent.innerHTML = await renderResultsPage();
+                    await setupResultsPage();
+                }
                 break;
             case 'stats':
                 mainContent.innerHTML = await renderStatsPage();
                 break;
             case 'playlist':
-                mainContent.innerHTML = await renderPlaylistPage();
-                setupPlaylistPage();
+                {
+                    const week = Storage.getCurrentWeek();
+                    const submissions = await Storage.getSubmissions(week);
+                    if (submissions.length < 6) {
+                        mainContent.innerHTML = `
+                            <div class="page active">
+                                <h2 class="page-title">Spotify Playlist</h2>
+                                <div class="empty-state">
+                                    <p>The playlist is available once at least 6 albums have been submitted this week (${submissions.length}/6).</p>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        mainContent.innerHTML = await renderPlaylistPage();
+                        setupPlaylistPage();
+                    }
+                }
                 break;
             case 'admin':
                 mainContent.innerHTML = await renderAdminPage();
@@ -348,6 +408,7 @@ function setupSubmitPage() {
                 if (result.success) {
                     showMessage('submit-message', result.message, 'success');
                     form.reset();
+                    await updateNavigationVisibility();
                     setTimeout(async () => {
                         await renderPage('submit');
                     }, 1000);
@@ -995,8 +1056,10 @@ async function renderStatsPage() {
                 : 0
         }))
         .sort((a, b) => {
-            if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
-            return parseFloat(b.accuracy) - parseFloat(a.accuracy);
+            const accA = parseFloat(a.accuracy);
+            const accB = parseFloat(b.accuracy);
+            if (accB !== accA) return accB - accA;
+            return b.totalCorrect - a.totalCorrect;
         });
     const overallLeaderboard = addLeaderboardRanks(overallSorted, e => `${e.totalCorrect}-${e.totalGuesses}-${e.accuracy}`);
 
@@ -1301,7 +1364,7 @@ async function setupAdminPage() {
             
             if (password === correctPassword) {
                 Storage.setAdminLoggedIn(true);
-                updateNavigationVisibility();
+                await updateNavigationVisibility();
                 showMessage('admin-message', 'Login successful!', 'success');
                 setTimeout(async () => {
                     await renderPage('admin');
@@ -1316,7 +1379,7 @@ async function setupAdminPage() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
             Storage.setAdminLoggedIn(false);
-            updateNavigationVisibility();
+            await updateNavigationVisibility();
             // If on settings page, redirect to admin
             if (currentPage === 'settings') {
                 await navigateToPage('admin');
