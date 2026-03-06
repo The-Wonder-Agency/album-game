@@ -92,7 +92,6 @@ header h1 {
     text-decoration: none;
     border-radius: 50px;
     color: #333;
-    transition: background 0.3s ease, color 0.3s ease;
     background-color: #EFE6E5;
     border: none;
     cursor: pointer;
@@ -181,7 +180,6 @@ main {
     border: 2px solid var(--border-light);
     border-radius: 6px;
     font-size: 1rem;
-    transition: all 0.2s ease;
     background: white;
     color: var(--text-primary);
 }
@@ -199,7 +197,6 @@ main {
     text-decoration: none;
     border-radius: 50px;
     color: #333;
-    transition: background 0.3s ease, color 0.3s ease;
     background-color: #EFE6E5;
     border: none;
     font-size: 1rem;
@@ -207,19 +204,9 @@ main {
     cursor: pointer;
 }
 
-.btn:hover {
-    background-color: #E11D1D;
-    color: white;
-}
-
 .btn-secondary {
     background-color: #EFE6E5;
     color: #333;
-}
-
-.btn-secondary:hover {
-    background-color: #E11D1D;
-    color: white;
 }
 
 .btn-danger {
@@ -227,19 +214,9 @@ main {
     color: #333;
 }
 
-.btn-danger:hover {
-    background-color: #E11D1D;
-    color: white;
-}
-
 .btn-success {
     background-color: #EFE6E5;
     color: #333;
-}
-
-.btn-success:hover {
-    background-color: #E11D1D;
-    color: white;
 }
 
 .album-card {
@@ -248,12 +225,11 @@ main {
     padding: 24px;
     margin-bottom: 20px;
     border: 2px solid var(--border-light);
-    transition: all 0.2s ease;
 }
 
-.album-card:hover {
-    border-color: var(--brand-navy);
-    box-shadow: 0 4px 12px rgba(38, 84, 118, 0.15);
+.btn-open-spotify {
+    background-color: #E11D1D !important;
+    color: white !important;
 }
 
 .album-card h3 {
@@ -274,11 +250,6 @@ main {
     color: var(--brand-blue);
     text-decoration: none;
     word-break: break-all;
-}
-
-.album-card a:hover {
-    text-decoration: underline;
-    color: var(--brand-light-blue);
 }
 
 .guess-form {
@@ -311,11 +282,6 @@ main {
 .guess-options label {
     padding: 8px;
     border-radius: 4px;
-    transition: background 0.2s ease;
-}
-
-.guess-options label:hover {
-    background: rgba(213, 185, 173, 0.2);
 }
 
 .guess-options input[type="checkbox"],
@@ -413,6 +379,10 @@ main {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
+}
+
+.leaderboard-rest-grid.rest-count-1 {
+    grid-template-columns: 1fr;
 }
 
 .leaderboard-rest-grid.rest-count-2 {

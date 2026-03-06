@@ -574,11 +574,17 @@ const Storage = {
         return { success: true };
     },
 
-    // Get all weeks that have submissions
+    // Get all weeks that have submissions (sorted by date, most recent first)
     async getAllWeeks() {
         const data = await this.getData();
         const weeks = Object.keys(data.submissions || {});
-        return weeks.sort().reverse(); // Most recent first
+        return weeks.sort((a, b) => {
+            const parse = (s) => {
+                const [d, m, y] = s.split('/').map(Number);
+                return new Date(y, m - 1, d).getTime();
+            };
+            return parse(b) - parse(a);
+        });
     },
 
     // Admin password

@@ -10,6 +10,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     await initializeApp();
     setupNavigation();
     await renderPage(currentPage);
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-page') === currentPage);
+    });
+    const mainContent = document.getElementById('main-content');
+    if (mainContent) mainContent.setAttribute('data-current-page', currentPage);
 });
 
 async function initializeApp() {
@@ -174,6 +179,8 @@ async function navigateToPage(page) {
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-page') === page);
     });
+    const mainContent = document.getElementById('main-content');
+    if (mainContent) mainContent.setAttribute('data-current-page', page);
 
     await renderPage(page);
 }
@@ -320,7 +327,7 @@ async function renderSubmitPage() {
                 </div>
             `}
             ${userSubmissions.length > 0 ? `
-                <h3 style="margin-top: 30px;">Your Submissions This Week:</h3>
+                <h3 style="margin-top: 30px; margin-bottom: 16px;">Your Submissions This Week:</h3>
                 ${userSubmissions.map(sub => `
                     <div class="album-card">
                         <h3>${sub.album}</h3>
@@ -1023,7 +1030,7 @@ async function renderResultsContent(week) {
                 </div>
             ` : ''}
             ${restPlace.length > 0 ? `
-                <div class="leaderboard-rest-grid ${restPlace.length === 2 ? 'rest-count-2' : ''}">
+                <div class="leaderboard-rest-grid ${restPlace.length === 1 ? 'rest-count-1' : restPlace.length === 2 ? 'rest-count-2' : ''}">
                     ${restPlace.map((entry) => `
                         <div class="leaderboard-item ${entry.rankClass}">
                             <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
@@ -1110,7 +1117,7 @@ async function renderStatsPage() {
                                 </div>
                             ` : ''}
                             ${restPlace.length > 0 ? `
-                                <div class="leaderboard-rest-grid ${restPlace.length === 2 ? 'rest-count-2' : ''}">
+                                <div class="leaderboard-rest-grid ${restPlace.length === 1 ? 'rest-count-1' : restPlace.length === 2 ? 'rest-count-2' : ''}">
                                     ${restPlace.map((entry) => `
                                         <div class="leaderboard-item ${entry.rankClass}">
                                             <span><strong>${entry.displayRank}</strong> ${entry.member}<small class="leaderboard-weeks-played"> ${entry.weeksPlayed || 0} weeks played</small></span>
@@ -1158,8 +1165,8 @@ async function renderStatsPage() {
                                 </div>
                             ` : ''}
                             ${restPlace.length > 0 ? `
-                                <div class="leaderboard-rest-grid ${restPlace.length === 2 ? 'rest-count-2' : ''} ${restPlace.length > 3 ? 'rest-stack' : ''}">
-                                    ${restPlace.map((entry) => `
+<div class="leaderboard-rest-grid ${restPlace.length === 1 ? 'rest-count-1' : restPlace.length === 2 ? 'rest-count-2' : ''} ${restPlace.length > 3 ? 'rest-stack' : ''}">
+                                        ${restPlace.map((entry) => `
                                         <div class="leaderboard-item ${entry.rankClass}">
                                             <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
                                             <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
@@ -1230,7 +1237,7 @@ async function renderPlaylistPage() {
                 </div>
             ` : ''}
 
-            <h3 style="margin-top: 30px;">Albums with Spotify URLs</h3>
+            <h3 style="margin-top: 30px; margin-bottom: 16px;">Albums with Spotify URLs</h3>
             ${albumsWithUrls.length > 0 ? `
                 <div style="display: grid; gap: 15px; margin-bottom: 30px;">
                     ${albumsWithUrls.map((sub, index) => {
@@ -1245,7 +1252,7 @@ async function renderPlaylistPage() {
                                         ${spotifyAlbumUrl}
                                     </a>
                                 </div>
-                                <a href="${spotifyAlbumUrl}" target="_blank" class="btn" style="margin-left: 15px; text-decoration: none; color: white !important;">
+                                <a href="${spotifyAlbumUrl}" target="_blank" class="btn btn-open-spotify" style="margin-left: 15px; text-decoration: none; color: white !important;">
                                     Open in Spotify
                                 </a>
                             </div>
