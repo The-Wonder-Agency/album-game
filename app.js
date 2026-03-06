@@ -92,7 +92,7 @@ async function checkUrlParameters() {
 
 function isBeforeMidday() {
     const now = new Date();
-    return now.getHours() < 12;
+    return now.getHours() < 10 || (now.getHours() === 10 && now.getMinutes() < 30);
 }
 
 async function updateNavigationVisibility() {
@@ -109,7 +109,7 @@ async function updateNavigationVisibility() {
     if (guessBtn) {
         if (isBeforeMidday()) {
             guessBtn.disabled = true;
-            guessBtn.title = 'Available from midday';
+            guessBtn.title = 'Available from 10:30';
         } else {
             guessBtn.disabled = false;
             guessBtn.removeAttribute('title');
@@ -120,7 +120,7 @@ async function updateNavigationVisibility() {
     if (resultsBtn) {
         if (isBeforeMidday()) {
             resultsBtn.disabled = true;
-            resultsBtn.title = 'Available from midday';
+            resultsBtn.title = 'Available from 10:30';
         } else {
             resultsBtn.disabled = false;
             resultsBtn.removeAttribute('title');
@@ -194,7 +194,7 @@ async function renderPage(page) {
                         <div class="page active">
                             <h2 class="page-title">Guess</h2>
                             <div class="empty-state">
-                                <p>Guessing opens at midday. Check back later!</p>
+                                <p>Guessing opens at 10:30. Check back later!</p>
                             </div>
                         </div>
                     `;
@@ -209,7 +209,7 @@ async function renderPage(page) {
                         <div class="page active">
                             <h2 class="page-title">Results</h2>
                             <div class="empty-state">
-                                <p>Results are available from midday. Check back later!</p>
+                                <p>Results are available from 10:30. Check back later!</p>
                             </div>
                         </div>
                     `;
@@ -395,6 +395,21 @@ function setupSubmitPage() {
             if (!artist || !album) {
                 showMessage('submit-message', 'Please fill in artist and album name.', 'error');
                 return;
+            }
+
+            // If a Spotify URL is provided, it must be an album URL, not a playlist
+            if (url) {
+                const urlLower = url.toLowerCase();
+                if (urlLower.includes('spotify.com')) {
+                    if (urlLower.includes('/playlist/')) {
+                        showMessage('submit-message', 'Please use a Spotify album URL, not a playlist URL.', 'error');
+                        return;
+                    }
+                    if (!urlLower.includes('/album/')) {
+                        showMessage('submit-message', 'Please use a Spotify album link (e.g. open.spotify.com/album/...).', 'error');
+                        return;
+                    }
+                }
             }
 
             const submitBtn = form.querySelector('button[type="submit"]');
