@@ -100,6 +100,30 @@ function isBeforeMidday() {
     return now.getHours() < 10 || (now.getHours() === 10 && now.getMinutes() < 30);
 }
 
+/** Deterministic shuffle so playlist order is random for the week but stable for everyone. */
+function seededShuffle(array, seedKey) {
+    let seed = 0;
+    for (let i = 0; i < seedKey.length; i++) {
+        seed = ((seed << 5) - seed) + seedKey.charCodeAt(i);
+        seed |= 0;
+    }
+    const arr = [...array];
+    function next() {
+        seed = (Math.imul(seed, 1103515245) + 12345) | 0;
+        return (seed >>> 0) / 0xffffffff;
+    }
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(next() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+async function canViewResultsForCurrentWeek() {
+    if (!currentGuesser) return false;
+    return await Storage.areGuessesFinalized(currentGuesser);
+}
+
 async function updateNavigationVisibility() {
     const settingsBtn = document.querySelector('.nav-btn[data-page="settings"]');
     if (settingsBtn) {
@@ -126,6 +150,9 @@ async function updateNavigationVisibility() {
         if (isBeforeMidday()) {
             resultsBtn.disabled = true;
             resultsBtn.title = 'Available from 10:30';
+        } else if (!(await canViewResultsForCurrentWeek())) {
+            resultsBtn.disabled = true;
+            resultsBtn.title = 'Save and finalize your guesses on the Guess page first';
         } else {
             resultsBtn.disabled = false;
             resultsBtn.removeAttribute('title');
@@ -164,6 +191,9 @@ async function navigateToPage(page) {
     }
     if (page === 'results' && isBeforeMidday()) {
         return; // Results button is disabled, but guard in case of hash/navigation
+    }
+    if (page === 'results' && !(await canViewResultsForCurrentWeek())) {
+        return;
     }
     if (page === 'playlist') {
         const week = Storage.getCurrentWeek();
@@ -217,6 +247,15 @@ async function renderPage(page) {
                             <h2 class="page-title">Results</h2>
                             <div class="empty-state">
                                 <p>Results are available from 10:30. Check back later!</p>
+                            </div>
+                        </div>
+                    `;
+                } else if (!(await canViewResultsForCurrentWeek())) {
+                    mainContent.innerHTML = `
+                        <div class="page active">
+                            <h2 class="page-title">Results</h2>
+                            <div class="empty-state">
+                                <p>Results open after you save and finalize your guesses on the Guess page.</p>
                             </div>
                         </div>
                     `;
@@ -350,6 +389,7 @@ function setupSubmitPage() {
             if (name) {
                 currentGuesser = name;
                 localStorage.setItem('currentGuesser', name);
+                await updateNavigationVisibility();
                 await renderPage('submit');
             }
         });
@@ -363,6 +403,7 @@ function setupSubmitPage() {
             if (name && name !== currentGuesser) {
                 currentGuesser = name;
                 localStorage.setItem('currentGuesser', name);
+                await updateNavigationVisibility();
                 await renderPage('submit');
             }
         });
@@ -604,6 +645,7 @@ function setupGuessPage() {
         guesserNameInput.addEventListener('change', async (e) => {
             currentGuesser = e.target.value.trim();
             localStorage.setItem('currentGuesser', currentGuesser);
+            await updateNavigationVisibility();
             await renderPage('guess');
         });
     }
@@ -721,7 +763,8 @@ function setupGuessPage() {
                     }
 
                     await Storage.finalizeGuesses(currentGuesser);
-                    
+
+                    await updateNavigationVisibility();
                     showMessage('guess-message', `Saved and finalized ${totalGuesses} guess(es)!`, 'success');
                     setTimeout(async () => {
                         await renderPage('guess');
@@ -1199,18 +1242,17 @@ async function renderPlaylistPage() {
         `;
     }
 
-    // Group by artist for better organization
-    const albumsWithUrls = submissions.filter(sub => sub.url && sub.url.includes('spotify.com'));
-    const albumsWithoutUrls = submissions.filter(sub => !sub.url || !sub.url.includes('spotify.com'));
+    const idSig = submissions.map(s => s.id).sort((a, b) => a - b).join(',');
+    const shuffled = seededShuffle([...submissions], `${week}|${idSig}`);
 
-    // Extract Spotify album IDs from URLs
+    // Extract Spotify album IDs from URLs (order follows shuffled list)
     const getSpotifyId = (url) => {
         const match = url.match(/album\/([a-zA-Z0-9]+)/);
         return match ? match[1] : null;
     };
 
-    const spotifyIds = albumsWithUrls
-        .map(sub => getSpotifyId(sub.url))
+    const spotifyIds = shuffled
+        .map(sub => (sub.url && sub.url.includes('spotify.com') ? getSpotifyId(sub.url) : null))
         .filter(id => id !== null);
 
     // Create Spotify playlist URL
@@ -1222,7 +1264,10 @@ async function renderPlaylistPage() {
         <div class="page active">
             <h2 class="page-title">Spotify Playlist</h2>
             <p style="margin-bottom: 20px; color: #666666;">
-                Week: <strong>${week}</strong> | Total Albums: ${submissions.length} | With Spotify URLs: ${albumsWithUrls.length}
+                Week: <strong>${week}</strong> | Total Albums: ${submissions.length} | With Spotify URLs: ${spotifyIds.length}
+            </p>
+            <p style="margin-bottom: 16px; color: #666666; font-size: 0.95rem;">
+                Album order is randomized for this week (same order for everyone).
             </p>
 
             ${spotifyIds.length > 0 ? `
@@ -1237,12 +1282,13 @@ async function renderPlaylistPage() {
                 </div>
             ` : ''}
 
-            <h3 style="margin-top: 30px; margin-bottom: 16px;">Albums with Spotify URLs</h3>
-            ${albumsWithUrls.length > 0 ? `
-                <div style="display: grid; gap: 15px; margin-bottom: 30px;">
-                    ${albumsWithUrls.map((sub, index) => {
-                        const spotifyId = getSpotifyId(sub.url);
-                        const spotifyAlbumUrl = spotifyId ? `https://open.spotify.com/album/${spotifyId}` : sub.url;
+            <h3 style="margin-top: 30px; margin-bottom: 16px;">This week&rsquo;s albums</h3>
+            <div style="display: grid; gap: 15px; margin-bottom: 30px;">
+                ${shuffled.map((sub) => {
+                    const hasSpotify = sub.url && sub.url.includes('spotify.com');
+                    const spotifyId = hasSpotify ? getSpotifyId(sub.url) : null;
+                    const spotifyAlbumUrl = spotifyId ? `https://open.spotify.com/album/${spotifyId}` : (sub.url || '#');
+                    if (hasSpotify && spotifyId) {
                         return `
                             <div class="album-card" style="display: flex; justify-content: space-between; align-items: center;">
                                 <div style="flex: 1;">
@@ -1257,22 +1303,16 @@ async function renderPlaylistPage() {
                                 </a>
                             </div>
                         `;
-                    }).join('')}
-                </div>
-            ` : '<p style="color: #666666;">No albums with Spotify URLs yet.</p>'}
-
-            ${albumsWithoutUrls.length > 0 ? `
-                <h3 style="margin-top: 30px;">Albums without Spotify URLs</h3>
-                <div style="display: grid; gap: 15px;">
-                    ${albumsWithoutUrls.map(sub => `
+                    }
+                    return `
                         <div class="album-card">
                             <h3>${sub.album}</h3>
                             <p><strong>Artist:</strong> ${sub.artist}</p>
                             <p style="color: #999999; font-size: 0.9rem;">No Spotify URL provided</p>
                         </div>
-                    `).join('')}
-                </div>
-            ` : ''}
+                    `;
+                }).join('')}
+            </div>
 
             <div style="margin-top: 30px; padding: 20px; background: #fafafa; border: 2px solid #e0e0e0; border-radius: 8px;">
                 <h3 style="margin-bottom: 10px; color: #333333;">Manual Playlist Creation</h3>
