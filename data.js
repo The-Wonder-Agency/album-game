@@ -112,6 +112,17 @@ const Storage = {
         }
     },
 
+    // Always fetch latest data before a write (avoids stale overwrites)
+    async getFreshData() {
+        if (this.isGistConfigured()) {
+            const data = await this.fetchGist();
+            localStorage.setItem('gistDataCache', JSON.stringify(data));
+            localStorage.setItem('gistDataCacheTime', Date.now().toString());
+            return data;
+        }
+        return this.getDataFromLocalStorage();
+    },
+
     // Get data from localStorage
     getDataFromLocalStorage() {
         const data = this.getDefaultData();
@@ -311,7 +322,7 @@ const Storage = {
     },
 
     async addTeamMember(name) {
-        const data = await this.getData();
+        const data = await this.getFreshData();
         if (!data.teamMembers) {
             data.teamMembers = [];
         }
@@ -325,7 +336,7 @@ const Storage = {
     },
 
     async deleteTeamMember(name) {
-        const data = await this.getData();
+        const data = await this.getFreshData();
         if (data.teamMembers) {
             data.teamMembers = data.teamMembers.filter(m => m.toLowerCase() !== name.toLowerCase());
             await this.saveData(data);
@@ -341,7 +352,7 @@ const Storage = {
 
     async addSubmission(artist, album, url, submitter) {
         const week = this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.submissions) {
             data.submissions = {};
@@ -352,10 +363,10 @@ const Storage = {
         
         const submissions = data.submissions[week];
         
-        // Check if submitter already has 2 submissions this week
+        // Check if submitter already has 1 submission this week
         const userSubmissions = submissions.filter(s => s.submitter === submitter);
-        if (userSubmissions.length >= 2) {
-            return { success: false, message: 'You have already submitted 2 albums this week.' };
+        if (userSubmissions.length >= 1) {
+            return { success: false, message: 'You have already submitted an album this week.' };
         }
 
         const submission = {
@@ -387,7 +398,7 @@ const Storage = {
 
     async saveGuess(submissionId, guesser, guessedSubmitter) {
         const week = this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.guesses) {
             data.guesses = {};
@@ -425,7 +436,7 @@ const Storage = {
     // Finalize guesses for a user/week (lock them)
     async finalizeGuesses(guesser, week = null) {
         const weekKey = week || this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.finalizedGuesses) {
             data.finalizedGuesses = {};
@@ -448,7 +459,7 @@ const Storage = {
         }
 
         const week = this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.guesses) {
             data.guesses = {};
@@ -486,7 +497,7 @@ const Storage = {
         }
 
         const week = this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.guesses || !data.guesses[week]) {
             return;
@@ -511,7 +522,7 @@ const Storage = {
         }
 
         const week = this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.guesses || !data.guesses[week]) {
             return;
@@ -529,7 +540,7 @@ const Storage = {
     // Clear this week's submissions
     async clearWeekSubmissions(week = null) {
         const weekKey = week || this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.submissions) {
             data.submissions = {};
@@ -543,7 +554,7 @@ const Storage = {
     // Clear this week's guesses
     async clearWeekGuesses(week = null) {
         const weekKey = week || this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.guesses) {
             data.guesses = {};
@@ -563,7 +574,7 @@ const Storage = {
     // Clear finalized guesses for a week (unlock guesses)
     async clearFinalizedGuesses(week = null) {
         const weekKey = week || this.getCurrentWeek();
-        const data = await this.getData();
+        const data = await this.getFreshData();
         
         if (!data.finalizedGuesses) {
             data.finalizedGuesses = {};
@@ -592,7 +603,7 @@ const Storage = {
         localStorage.setItem('adminPassword', password);
         // Also update in Gist data if configured
         if (this.isGistConfigured()) {
-            const data = await this.getData();
+            const data = await this.getFreshData();
             data.adminPassword = password;
             await this.saveData(data);
         }

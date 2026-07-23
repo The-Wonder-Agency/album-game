@@ -312,7 +312,7 @@ async function renderSubmitPage() {
     const submissions = await Storage.getSubmissions(week);
     const members = await Storage.getTeamMembers();
     const userSubmissions = submissions.filter(s => s.submitter === currentGuesser);
-    const remaining = 2 - userSubmissions.length;
+    const remaining = 1 - userSubmissions.length;
 
     return `
         <div class="page active">
@@ -333,7 +333,7 @@ async function renderSubmitPage() {
                     </select>
                 </div>
             ` : `
-                <div class="submission-count">Submissions this week: ${userSubmissions.length}/2</div>
+                <div class="submission-count">Submissions this week: ${userSubmissions.length}/1</div>
             `}
             ${remaining > 0 && members.length > 0 ? `
                 <form id="submit-form">
@@ -362,7 +362,7 @@ async function renderSubmitPage() {
                 </form>
             ` : `
                 <div class="alert alert-info">
-                    You have submitted 2 albums this week. Check back next week!
+                    You have already submitted your album this week. Check back next week!
                 </div>
             `}
             ${userSubmissions.length > 0 ? `
@@ -585,11 +585,11 @@ async function renderGuessPage() {
             ${hasDuplicates ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
                     <p style="margin-bottom: 0;"><strong>Note:</strong> One album in this week was submitted by ${maxDuplicateCount} team member(s). 
-                    You can select up to ${maxDuplicateCount} people on ONE album if you think it's the duplicate. All other albums should have only one selection. You can select each person at most twice in total.</p>
+                    You can select up to ${maxDuplicateCount} people on ONE album if you think it's the duplicate. All other albums should have only one selection. You can select each person at most once in total.</p>
                 </div>
             ` : `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
-                    <p style="margin-bottom: 0;">You can select each person at most twice in total across all albums.</p>
+                    <p style="margin-bottom: 0;">You can select each person at most once across all albums.</p>
                 </div>
             `}
             ${uniqueAlbums.map(albumGroup => {
@@ -725,14 +725,14 @@ function setupGuessPage() {
                 }
             }
 
-            // Validate: no person selected more than twice across all albums
+            // Validate: no person selected more than once across all albums
             const countByPerson = {};
             for (const g of guessesToSave) {
                 countByPerson[g.guessedSubmitter] = (countByPerson[g.guessedSubmitter] || 0) + 1;
             }
-            const overSelected = Object.entries(countByPerson).find(([, count]) => count > 2);
+            const overSelected = Object.entries(countByPerson).find(([, count]) => count > 1);
             if (overSelected) {
-                showMessage('guess-message', `You can select each person at most twice. "${overSelected[0]}" is selected ${overSelected[1]} times.`, 'error');
+                showMessage('guess-message', `You can select each person at most once. "${overSelected[0]}" is selected ${overSelected[1]} times.`, 'error');
                 return;
             }
 
@@ -743,7 +743,7 @@ function setupGuessPage() {
                 try {
                     const week = Storage.getCurrentWeek();
                     // Fetch latest data right before modifying to avoid overwriting another user's guesses
-                    const data = await Storage.getData();
+                    const data = await Storage.getFreshData();
                     if (!data.guesses) data.guesses = {};
                     if (!data.guesses[week]) data.guesses[week] = [];
                     // Remove only this guesser's guesses for this week (keep everyone else's)
@@ -757,18 +757,19 @@ function setupGuessPage() {
                             week
                         });
                     }
+                    // Finalize in the same save
+                    if (!data.finalizedGuesses) data.finalizedGuesses = {};
+                    if (!data.finalizedGuesses[week]) data.finalizedGuesses[week] = [];
+                    if (!data.finalizedGuesses[week].includes(currentGuesser)) {
+                        data.finalizedGuesses[week].push(currentGuesser);
+                    }
                     const saveResult = await Storage.saveData(data);
                     if (!saveResult || !saveResult.success) {
                         throw new Error('Failed to save guesses');
                     }
 
-                    await Storage.finalizeGuesses(currentGuesser);
-
                     await updateNavigationVisibility();
-                    showMessage('guess-message', `Saved and finalized ${totalGuesses} guess(es)!`, 'success');
-                    setTimeout(async () => {
-                        await renderPage('guess');
-                    }, 1000);
+                    await navigateToPage('results');
                 } catch (error) {
                     console.error('Error saving guesses:', error);
                     showMessage('guess-message', 'Error saving guesses: ' + error.message, 'error');
@@ -779,7 +780,7 @@ function setupGuessPage() {
         });
     }
 
-    // Count how many times each person is selected across all albums; enforce max 2 per person
+    // Count how many times each person is selected across all albums; enforce max 1 per person
     function getSelectionCountByPerson() {
         const count = {};
         guessGroups.forEach(group => {
@@ -793,7 +794,7 @@ function setupGuessPage() {
         return count;
     }
 
-    function updateMaxTwoPerPersonState() {
+    function updateMaxOnePerPersonState() {
         const countByPerson = getSelectionCountByPerson();
         guessGroups.forEach(group => {
             const useRadio = group.getAttribute('data-use-radio') === 'true';
@@ -803,7 +804,7 @@ function setupGuessPage() {
                 const total = countByPerson[name] || 0;
                 const alreadySelectedHere = input.checked;
                 input.disabled = guessesFinalized;
-                if (!guessesFinalized && !alreadySelectedHere && total >= 2) {
+                if (!guessesFinalized && !alreadySelectedHere && total >= 1) {
                     input.disabled = true;
                 }
             });
@@ -811,7 +812,7 @@ function setupGuessPage() {
     }
 
     const guessesFinalized = document.querySelector('.page.active')?.getAttribute('data-guesses-finalized') === 'true';
-    updateMaxTwoPerPersonState();
+    updateMaxOnePerPersonState();
 
     // Auto-save on change (only if not finalized) - for checkboxes only (radio buttons handled on save)
     const hasDuplicates = document.querySelector('.guess-options[data-use-radio="false"]') !== null;
@@ -848,11 +849,11 @@ function setupGuessPage() {
                                 showMessage('guess-message', `You can only select up to ${maxSelections} people on one album.`, 'error');
                                 return;
                             }
-                            // Check max 2 per person across all albums
+                            // Check max 1 per person across all albums
                             const countByPerson = getSelectionCountByPerson();
-                            if (countByPerson[checkbox.value] > 2) {
+                            if (countByPerson[checkbox.value] > 1) {
                                 checkbox.checked = false;
-                                showMessage('guess-message', 'You can select each person at most twice across all albums.', 'error');
+                                showMessage('guess-message', 'You can select each person at most once across all albums.', 'error');
                                 return;
                             }
                             // If this album now has multiple selections, ensure no other album has multiple
@@ -862,7 +863,7 @@ function setupGuessPage() {
                                 return;
                             }
                         }
-                        updateMaxTwoPerPersonState();
+                        updateMaxOnePerPersonState();
                         
                         try {
                             const albumKey = group.getAttribute('data-album-key');
@@ -875,26 +876,26 @@ function setupGuessPage() {
                         } catch (error) {
                             showMessage('guess-message', error.message, 'error');
                             checkbox.checked = !checkbox.checked;
-                            updateMaxTwoPerPersonState();
+                            updateMaxOnePerPersonState();
                         }
                     }
                 });
             });
         } else if (!useRadio) {
-            // Regular checkboxes - still enforce max 2 per person
+            // Regular checkboxes - still enforce max 1 per person
             const checkboxes = group.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(checkbox => {
                 checkbox.addEventListener('change', async () => {
                     if (currentGuesser && !checkbox.disabled) {
                         if (checkbox.checked) {
                             const countByPerson = getSelectionCountByPerson();
-                            if (countByPerson[checkbox.value] > 2) {
+                            if (countByPerson[checkbox.value] > 1) {
                                 checkbox.checked = false;
-                                showMessage('guess-message', 'You can select each person at most twice across all albums.', 'error');
+                                showMessage('guess-message', 'You can select each person at most once across all albums.', 'error');
                                 return;
                             }
                         }
-                        updateMaxTwoPerPersonState();
+                        updateMaxOnePerPersonState();
                         try {
                             const albumKey = group.getAttribute('data-album-key');
                             const guessedSubmitter = checkbox.value;
@@ -906,17 +907,17 @@ function setupGuessPage() {
                         } catch (error) {
                             showMessage('guess-message', error.message, 'error');
                             checkbox.checked = !checkbox.checked;
-                            updateMaxTwoPerPersonState();
+                            updateMaxOnePerPersonState();
                         }
                     }
                 });
             });
         } else {
-            // Radio buttons - enforce max 2 per person on change
+            // Radio buttons - enforce max 1 per person on change
             const radios = group.querySelectorAll('input[type="radio"]');
             radios.forEach(radio => {
                 radio.addEventListener('change', () => {
-                    updateMaxTwoPerPersonState();
+                    updateMaxOnePerPersonState();
                 });
             });
         }
@@ -996,51 +997,37 @@ async function renderResultsContent(week) {
     });
 
     // Show grouped albums
+    let correctCount = 0;
+    let guessedCount = 0;
     const submissionsHtml = Object.values(albumGroups).map(albumGroup => {
-        const actualSubmitters = [...new Set(albumGroup.actualSubmitters)]; // Remove duplicates
+        const actualSubmitters = [...new Set(albumGroup.actualSubmitters)];
         const guessedSubmitters = guessesByAlbum[albumGroup.key] || [];
-        const isDuplicate = actualSubmitters.length > 1;
-        
-        // Calculate correct/incorrect guesses
         const correctGuesses = guessedSubmitters.filter(g => actualSubmitters.includes(g));
-        const incorrectGuesses = guessedSubmitters.filter(g => !actualSubmitters.includes(g));
         const missedSubmitters = actualSubmitters.filter(a => !guessedSubmitters.includes(a));
-        
         const hasGuesses = guessedSubmitters.length > 0;
-        // All correct if you got all actual submitters (even if you guessed extra people)
         const allCorrect = missedSubmitters.length === 0 && correctGuesses.length === actualSubmitters.length;
-        
-        // Determine result message
-        let resultMessage = '';
-        if (allCorrect) {
-            resultMessage = '✓ All Correct!';
-        } else if (correctGuesses.length === 0) {
-            // No correct guesses at all
-            resultMessage = '✗ Incorrect';
-        } else if (missedSubmitters.length > 0) {
-            // Some correct but missed some - partial
-            resultMessage = `Partial: ${correctGuesses.length}/${actualSubmitters.length} correct`;
-        } else {
-            // Got all submitters but also guessed extra people - still correct!
-            resultMessage = '✓ All Correct!';
+
+        if (hasGuesses) {
+            guessedCount++;
+            if (allCorrect) correctCount++;
         }
-        
+
+        const resultMessage = hasGuesses
+            ? (allCorrect ? '✓ Correct' : '✗ Incorrect')
+            : '';
+
         return `
             <div class="result-item ${hasGuesses ? (allCorrect ? 'correct' : 'incorrect') : ''}">
                 <h4>${albumGroup.album} - ${albumGroup.artist}</h4>
-                ${hasGuesses ? `
-                    <p><strong>Submitted by:</strong> ${actualSubmitters.join(', ')}</p>
-                    ${isDuplicate ? `<p style="color: #00a8cc; font-weight: 600; margin-top: 5px;">✓ This was the duplicate album (submitted by ${actualSubmitters.length} person(s))</p>` : ''}
-                    <p><strong>Your guesses:</strong> ${guessedSubmitters.length > 0 ? guessedSubmitters.join(', ') : 'None'}</p>
-                    <p><strong>Correct:</strong> ${correctGuesses.length > 0 ? '✓ ' + correctGuesses.join(', ') : 'None'}</p>
-                    ${incorrectGuesses.length > 0 ? `<p><strong>Incorrect guesses:</strong> ✗ ${incorrectGuesses.join(', ')}</p>` : ''}
-                    ${missedSubmitters.length > 0 ? `<p><strong>Missed:</strong> ${missedSubmitters.join(', ')}</p>` : ''}
-                    <p><strong>Result:</strong> ${resultMessage}</p>
-                ` : '<p>You have not guessed this album yet. Make your guesses on the Guess page to see results.</p>'}
-                ${albumGroup.url ? `<p><a href="${albumGroup.url}" target="_blank">${albumGroup.url}</a></p>` : ''}
+                <p><strong>Submitted by:</strong> ${actualSubmitters.join(', ')}</p>
+                ${hasGuesses ? `<p><strong>Result:</strong> ${resultMessage}</p>` : ''}
             </div>
         `;
     }).join('');
+
+    const scoreHeader = guessedCount > 0
+        ? `<p style="margin-bottom: 20px;"><strong>Your score:</strong> ${correctCount}/${guessedCount} correct</p>`
+        : '';
 
     // Calculate leaderboard (with ties: same score = same rank, no highlight when tied)
     const leaderboardSorted = Object.entries(results.scores)
@@ -1087,6 +1074,7 @@ async function renderResultsContent(week) {
 
     content.innerHTML = `
         <h3>Submissions & Results</h3>
+        ${scoreHeader}
         <div class="results-grid">
             ${submissionsHtml}
         </div>

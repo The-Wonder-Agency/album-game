@@ -1,10 +1,10 @@
-# The All New All-New Album Game (AI Deluxe Edition)
+# The All New All-New Album Game (AI Super Deluxe Edition)
 
 A web-based album guessing game for teams, hosted on GitHub Pages.
 
 ## Features
 
-- **Submit Albums**: Each team member can anonymously submit up to 2 albums per week
+- **Submit Albums**: Each team member can anonymously submit up to 1 album per week
 - **Guess**: Team members guess who submitted each album
 - **Results**: View weekly results with correct/incorrect guesses and leaderboards
 - **Stats**: Track overall performance and week-by-week statistics
@@ -29,7 +29,7 @@ A web-based album guessing game for teams, hosted on GitHub Pages.
 ### Weekly Workflow
 
 1. **Friday**: The date automatically updates to show the current week
-2. **Submit**: Team members submit up to 2 albums each
+2. **Submit**: Team members submit 1 album each
 3. **Guess**: Team members guess who submitted each album
 4. **Results**: View results after everyone has guessed
 5. **Stats**: Check overall performance
@@ -84,6 +84,6 @@ If you prefer individual setup:
 
 - The date shown is always the upcoming Friday (the week's game date)
 - Submissions are anonymous until results are revealed
-- Each person can submit 2 albums per week
+- Each person can submit 1 album per week
 - Guesses are saved automatically as you make them
 - Duplicate albums (same artist + album) can be submitted by different people - users must guess which person submitted which one
