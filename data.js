@@ -83,12 +83,26 @@ const Storage = {
             submissions: {}, // { week: [submissions] }
             guesses: {}, // { week: [guesses] }
             finalizedGuesses: {}, // { week: [guesser names] }
+            themes: {}, // { week: { id, params, text } }
             adminPassword: 'admin',
             lastUpdated: new Date().toISOString()
         };
     },
 
     // Get data from Gist or localStorage
+    parseCachedGistData() {
+        const cached = localStorage.getItem('gistDataCache');
+        if (!cached) return null;
+        try {
+            return JSON.parse(cached);
+        } catch (error) {
+            console.error('Invalid gistDataCache in localStorage:', error);
+            localStorage.removeItem('gistDataCache');
+            localStorage.removeItem('gistDataCacheTime');
+            return null;
+        }
+    },
+
     async getData() {
         if (this.isGistConfigured()) {
             try {
@@ -99,10 +113,9 @@ const Storage = {
                 return data;
             } catch (error) {
                 console.error('Error fetching from Gist:', error);
-                // Try to use cached data if available
-                const cached = localStorage.getItem('gistDataCache');
+                const cached = this.parseCachedGistData();
                 if (cached) {
-                    return JSON.parse(cached);
+                    return cached;
                 }
                 // Fallback to localStorage
                 return this.getDataFromLocalStorage();
@@ -115,10 +128,19 @@ const Storage = {
     // Always fetch latest data before a write (avoids stale overwrites)
     async getFreshData() {
         if (this.isGistConfigured()) {
-            const data = await this.fetchGist();
-            localStorage.setItem('gistDataCache', JSON.stringify(data));
-            localStorage.setItem('gistDataCacheTime', Date.now().toString());
-            return data;
+            try {
+                const data = await this.fetchGist();
+                localStorage.setItem('gistDataCache', JSON.stringify(data));
+                localStorage.setItem('gistDataCacheTime', Date.now().toString());
+                return data;
+            } catch (error) {
+                console.error('Error fetching fresh Gist data:', error);
+                const cached = this.parseCachedGistData();
+                if (cached) {
+                    return cached;
+                }
+                return this.getDataFromLocalStorage();
+            }
         }
         return this.getDataFromLocalStorage();
     },
@@ -158,6 +180,12 @@ const Storage = {
                 const week = key.replace('finalizedGuesses_', '');
                 data.finalizedGuesses[week] = JSON.parse(localStorage.getItem(key));
             }
+        }
+
+        // Themes
+        const themes = localStorage.getItem('themes');
+        if (themes) {
+            data.themes = JSON.parse(themes);
         }
 
         // Admin password
@@ -212,6 +240,11 @@ const Storage = {
             localStorage.setItem(`finalizedGuesses_${week}`, JSON.stringify(data.finalizedGuesses[week]));
         });
 
+        // Themes
+        if (data.themes) {
+            localStorage.setItem('themes', JSON.stringify(data.themes));
+        }
+
         // Admin password
         if (data.adminPassword) {
             localStorage.setItem('adminPassword', data.adminPassword);
@@ -219,54 +252,66 @@ const Storage = {
     },
 
     // GitHub Gists API methods
+    getGistHeaders(includeJson = false) {
+        const headers = {
+            'Authorization': `Bearer ${this.getGitHubToken()}`,
+            'Accept': 'application/vnd.github.v3+json'
+        };
+        if (includeJson) {
+            headers['Content-Type'] = 'application/json';
+        }
+        return headers;
+    },
+
+    gistErrorMessage(status, fallback) {
+        if (status === 401) {
+            return 'GitHub token is invalid or expired. Create a new token with the "gist" scope and update it in Settings.';
+        }
+        if (status === 403) {
+            return 'GitHub access denied. Check that your token has the "gist" scope.';
+        }
+        if (status === 404) {
+            return 'Gist not found. Check the Gist ID in Settings.';
+        }
+        return fallback;
+    },
+
     async fetchGist() {
         const gistId = this.getGistId();
-        const token = this.getGitHubToken();
-        
+
         const response = await fetch(`https://api.github.com/gists/${gistId}`, {
-            headers: {
-                'Authorization': `token ${token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            }
+            headers: this.getGistHeaders()
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to fetch Gist: ${response.statusText}`);
+            throw new Error(this.gistErrorMessage(response.status, `Failed to fetch Gist: ${response.statusText}`));
         }
 
         const gist = await response.json();
         const filename = Object.keys(gist.files)[0];
         const content = gist.files[filename].content;
-        
+
         return JSON.parse(content);
     },
 
     async updateGist(data) {
         const gistId = this.getGistId();
-        const token = this.getGitHubToken();
-        
+
         // First, get the current Gist to get the filename
         const currentGist = await fetch(`https://api.github.com/gists/${gistId}`, {
-            headers: {
-                'Authorization': `token ${token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            }
+            headers: this.getGistHeaders()
         });
 
         if (!currentGist.ok) {
-            throw new Error(`Failed to fetch Gist: ${currentGist.statusText}`);
+            throw new Error(this.gistErrorMessage(currentGist.status, `Failed to fetch Gist: ${currentGist.statusText}`));
         }
 
         const gistData = await currentGist.json();
         const filename = Object.keys(gistData.files)[0] || 'album-game-data.json';
-        
+
         const response = await fetch(`https://api.github.com/gists/${gistId}`, {
             method: 'PATCH',
-            headers: {
-                'Authorization': `token ${token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            },
+            headers: this.getGistHeaders(true),
             body: JSON.stringify({
                 files: {
                     [filename]: {
@@ -277,23 +322,19 @@ const Storage = {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || `Failed to update Gist: ${response.statusText}`);
+            const error = await response.json().catch(() => ({}));
+            throw new Error(
+                this.gistErrorMessage(response.status, error.message || `Failed to update Gist: ${response.statusText}`)
+            );
         }
 
         return await response.json();
     },
 
     async createGist(data) {
-        const token = this.getGitHubToken();
-        
         const response = await fetch('https://api.github.com/gists', {
             method: 'POST',
-            headers: {
-                'Authorization': `token ${token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            },
+            headers: this.getGistHeaders(true),
             body: JSON.stringify({
                 description: 'Album Game Data',
                 public: false,
@@ -306,8 +347,10 @@ const Storage = {
         });
 
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || `Failed to create Gist: ${response.statusText}`);
+            const error = await response.json().catch(() => ({}));
+            throw new Error(
+                this.gistErrorMessage(response.status, error.message || `Failed to create Gist: ${response.statusText}`)
+            );
         }
 
         const gist = await response.json();
@@ -603,9 +646,13 @@ const Storage = {
         localStorage.setItem('adminPassword', password);
         // Also update in Gist data if configured
         if (this.isGistConfigured()) {
-            const data = await this.getFreshData();
-            data.adminPassword = password;
-            await this.saveData(data);
+            try {
+                const data = await this.getFreshData();
+                data.adminPassword = password;
+                await this.saveData(data);
+            } catch (error) {
+                console.error('Error syncing admin password to Gist:', error);
+            }
         }
     },
 
@@ -718,6 +765,52 @@ const Storage = {
             scores,
             week: weekKey
         };
+    },
+
+    // Weekly themes
+    async getWeekTheme(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getData();
+        return data.themes?.[weekKey] || null;
+    },
+
+    async ensureWeekTheme(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        try {
+            const data = await this.getFreshData();
+
+            if (!data.themes) {
+                data.themes = {};
+            }
+
+            if (data.themes[weekKey]) {
+                return data.themes[weekKey];
+            }
+
+            const theme = ThemeGenerator.generateTheme();
+            data.themes[weekKey] = theme;
+            await this.saveData(data);
+
+            const refreshed = await this.getFreshData();
+            return refreshed.themes?.[weekKey] || theme;
+        } catch (error) {
+            console.error('Error ensuring weekly theme:', error);
+            const data = this.parseCachedGistData() || this.getDataFromLocalStorage();
+            return data.themes?.[weekKey] || null;
+        }
+    },
+
+    async clearWeekTheme(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getFreshData();
+
+        if (!data.themes) {
+            data.themes = {};
+        }
+
+        delete data.themes[weekKey];
+        await this.saveData(data);
+        return { success: true };
     },
 
     // Get overall stats (async)

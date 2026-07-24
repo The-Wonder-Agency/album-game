@@ -569,6 +569,107 @@ main {
     margin-top: 10px;
 }
 
+/* Weekly theme modal */
+.theme-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(38, 84, 118, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.theme-modal-card {
+    background: white;
+    border-radius: 16px;
+    padding: 40px 36px;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+    animation: fadeIn 0.3s ease;
+}
+
+.theme-modal-card h2 {
+    color: var(--brand-navy);
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+}
+
+.theme-modal-text {
+    font-size: 1.25rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+    margin-bottom: 28px;
+    font-weight: 600;
+}
+
+.theme-modal-card .btn {
+    min-width: 140px;
+}
+
+.theme-banner {
+    background: linear-gradient(135deg, var(--brand-navy) 0%, var(--brand-blue) 100%);
+    color: white;
+    padding: 16px 20px;
+    border-radius: 10px;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.theme-banner-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.85;
+    margin-bottom: 6px;
+}
+
+.theme-banner-text {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.gist-error-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1100;
+    background: var(--brand-dark-red);
+    color: white;
+    padding: 16px 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.gist-error-banner-content {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.gist-error-banner p {
+    margin-bottom: 8px;
+}
+
+.gist-error-banner-help {
+    opacity: 0.9;
+    font-size: 0.95rem;
+}
+
+.gist-error-banner-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.gist-error-banner .btn-secondary {
+    background: white;
+    color: var(--brand-dark-red);
+}
+
 @media (max-width: 768px) {
     header h1 {
         font-size: 32px;

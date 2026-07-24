@@ -4,12 +4,35 @@ let currentPage = 'submit';
 let currentGuesser = '';
 let selectedWeek = Storage.getCurrentWeek();
 let isLoading = false;
+let currentWeekTheme = null;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
-    await initializeApp();
+    try {
+        await initializeApp();
+    } catch (error) {
+        console.error('App initialization error:', error);
+        showGistErrorBanner(error.message || 'The app failed to start properly.');
+    }
+
     setupNavigation();
-    await renderPage(currentPage);
+
+    try {
+        await renderPage(currentPage);
+    } catch (error) {
+        console.error('Error rendering initial page:', error);
+        const mainContent = document.getElementById('main-content');
+        if (mainContent) {
+            mainContent.innerHTML = `
+                <div class="page active">
+                    <div class="alert alert-error">
+                        <p>Something went wrong loading this page. Try opening Admin to fix your connection.</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-page') === currentPage);
     });
@@ -40,6 +63,65 @@ async function initializeApp() {
 
     // Update navigation visibility
     await updateNavigationVisibility();
+
+    // Ensure weekly theme exists and show popup if first visit this week
+    try {
+        currentWeekTheme = await Storage.ensureWeekTheme();
+        showThemePopupIfNeeded();
+    } catch (error) {
+        console.error('Error loading weekly theme:', error);
+    }
+
+    await checkGistConnection();
+}
+
+async function checkGistConnection() {
+    if (!Storage.isGistConfigured()) return;
+
+    try {
+        await Storage.fetchGist();
+        dismissGistErrorBanner();
+    } catch (error) {
+        showGistErrorBanner(error.message);
+    }
+}
+
+function showGistErrorBanner(message) {
+    dismissGistErrorBanner();
+
+    const banner = document.createElement('div');
+    banner.id = 'gist-error-banner';
+    banner.className = 'gist-error-banner';
+    banner.innerHTML = `
+        <div class="gist-error-banner-content">
+            <p><strong>Gist connection problem:</strong> ${escapeHtml(message)}</p>
+            <p class="gist-error-banner-help">Log in via Admin, then open Settings to update your GitHub token.</p>
+            <div class="gist-error-banner-actions">
+                <button type="button" class="btn btn-secondary" id="gist-error-admin-btn">Go to Admin</button>
+                <button type="button" class="btn btn-secondary" id="gist-error-disconnect-btn">Disconnect Gist</button>
+                <button type="button" class="btn btn-secondary" id="gist-error-dismiss-btn">Dismiss</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(banner);
+
+    document.getElementById('gist-error-admin-btn').addEventListener('click', () => {
+        navigateToPage('admin');
+    });
+    document.getElementById('gist-error-disconnect-btn').addEventListener('click', () => {
+        if (confirm('Disconnect from Gist and use local storage only? You can reconnect in Settings after logging in as admin.')) {
+            localStorage.removeItem('githubToken');
+            localStorage.removeItem('gistId');
+            dismissGistErrorBanner();
+            window.location.reload();
+        }
+    });
+    document.getElementById('gist-error-dismiss-btn').addEventListener('click', dismissGistErrorBanner);
+}
+
+function dismissGistErrorBanner() {
+    const banner = document.getElementById('gist-error-banner');
+    if (banner) banner.remove();
 }
 
 // Check URL parameters for Gist setup
@@ -69,6 +151,7 @@ async function checkUrlParameters() {
             // Test the connection by trying to fetch the Gist
             try {
                 await Storage.fetchGist();
+                dismissGistErrorBanner();
             } catch (fetchError) {
                 // If fetch fails, still store the values but show a warning
                 console.warn('Could not verify Gist connection:', fetchError);
@@ -98,6 +181,53 @@ async function checkUrlParameters() {
 function isBeforeMidday() {
     const now = new Date();
     return now.getHours() < 10 || (now.getHours() === 10 && now.getMinutes() < 30);
+}
+
+function showThemePopupIfNeeded() {
+    if (!currentWeekTheme) return;
+
+    const week = Storage.getCurrentWeek();
+    const seenKey = `themePopupSeen_${week}`;
+    if (localStorage.getItem(seenKey)) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'theme-modal-backdrop';
+    backdrop.id = 'theme-modal-backdrop';
+    backdrop.innerHTML = `
+        <div class="theme-modal-card" id="theme-modal-card">
+            <h2>This week's theme</h2>
+            <p class="theme-modal-text">${escapeHtml(currentWeekTheme.text)}</p>
+            <button type="button" class="btn" id="theme-modal-dismiss">Got it</button>
+        </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const card = document.getElementById('theme-modal-card');
+    const rect = card.getBoundingClientRect();
+    const originX = rect.left + rect.width / 2;
+    const originY = rect.top + rect.height / 2;
+    Confetti.burst(originX, originY);
+
+    document.getElementById('theme-modal-dismiss').addEventListener('click', () => {
+        localStorage.setItem(seenKey, 'true');
+        backdrop.remove();
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function renderThemeBanner() {
+    if (!currentWeekTheme) return '';
+    return `
+        <div class="theme-banner">
+            <div class="theme-banner-label">This week's theme</div>
+            <div class="theme-banner-text">${escapeHtml(currentWeekTheme.text)}</div>
+        </div>
+    `;
 }
 
 /** Deterministic shuffle so playlist order is random for the week but stable for everyone. */
@@ -317,6 +447,7 @@ async function renderSubmitPage() {
     return `
         <div class="page active">
             <h2 class="page-title">Submit Albums</h2>
+            ${renderThemeBanner()}
             ${members.length === 0 ? `
                 <div class="alert alert-info">
                     <p>No team members have been added yet. Please ask an admin to add team members first.</p>
@@ -1346,6 +1477,7 @@ async function renderAdminPage() {
     const currentWeek = Storage.getCurrentWeek();
     const submissions = await Storage.getSubmissions(currentWeek);
     const guesses = await Storage.getGuesses(currentWeek);
+    const weekTheme = await Storage.getWeekTheme(currentWeek);
 
     return `
         <div class="page active">
@@ -1376,6 +1508,18 @@ async function renderAdminPage() {
                         `).join('')}
                     </ul>
                 ` : '<p>No team members yet. Add one above!</p>'}
+            </div>
+
+            <div class="admin-section">
+                <h2>Weekly Theme</h2>
+                <p style="color: #666666; margin-bottom: 15px;">
+                    Week: <strong>${currentWeek}</strong><br>
+                    Current theme: ${weekTheme ? `<strong>${escapeHtml(weekTheme.text)}</strong>` : '<em>None set</em>'}
+                </p>
+                <button class="btn btn-danger" id="clear-theme-btn" ${!weekTheme ? 'disabled' : ''}>
+                    Clear Theme
+                </button>
+                <div id="clear-theme-message" style="margin-top: 10px;"></div>
             </div>
 
             <div class="admin-section">
@@ -1557,6 +1701,26 @@ async function setupAdminPage() {
             }
         });
     }
+
+    const clearThemeBtn = document.getElementById('clear-theme-btn');
+    if (clearThemeBtn) {
+        clearThemeBtn.addEventListener('click', async () => {
+            const currentWeek = Storage.getCurrentWeek();
+            if (confirm('Clear this week\'s theme? A new random theme will be chosen on the next page load.')) {
+                try {
+                    await Storage.clearWeekTheme();
+                    localStorage.removeItem(`themePopupSeen_${currentWeek}`);
+                    currentWeekTheme = null;
+                    showMessage('clear-theme-message', 'Theme cleared successfully!', 'success');
+                    setTimeout(async () => {
+                        await renderPage('admin');
+                    }, 1000);
+                } catch (error) {
+                    showMessage('clear-theme-message', 'Error clearing theme: ' + error.message, 'error');
+                }
+            }
+        });
+    }
 }
 
 // Settings Page
@@ -1712,6 +1876,7 @@ function setupSettingsPage() {
                     Storage.setGistId(gistId);
                     // Test connection
                     await Storage.fetchGist();
+                    dismissGistErrorBanner();
                     showMessage('gist-config-message', 'Gist connected successfully!', 'success');
                 } else {
                     // Create new Gist
