@@ -5,6 +5,7 @@ let currentGuesser = '';
 let selectedWeek = Storage.getCurrentWeek();
 let isLoading = false;
 let currentWeekTheme = null;
+const HARRY_HILL_IMAGE = 'images/harry-hill.jpg';
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
@@ -195,7 +196,8 @@ function showThemePopupIfNeeded() {
     backdrop.id = 'theme-modal-backdrop';
     backdrop.innerHTML = `
         <div class="theme-modal-card" id="theme-modal-card">
-            <h2>This week's theme</h2>
+            <img src="${HARRY_HILL_IMAGE}" alt="Harry Hill" class="theme-harry-hill theme-harry-hill--modal">
+            <h2>Theme of the Week</h2>
             <p class="theme-modal-text">${escapeHtml(currentWeekTheme.text)}</p>
             <button type="button" class="btn" id="theme-modal-dismiss">Got it</button>
         </div>
@@ -224,8 +226,11 @@ function renderThemeBanner() {
     if (!currentWeekTheme) return '';
     return `
         <div class="theme-banner">
-            <div class="theme-banner-label">This week's theme</div>
-            <div class="theme-banner-text">${escapeHtml(currentWeekTheme.text)}</div>
+            <img src="${HARRY_HILL_IMAGE}" alt="Harry Hill" class="theme-harry-hill theme-harry-hill--banner">
+            <div class="theme-banner-content">
+                <div class="theme-banner-label">Theme of the Week</div>
+                <div class="theme-banner-text">${escapeHtml(currentWeekTheme.text)}</div>
+            </div>
         </div>
     `;
 }

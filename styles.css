@@ -598,6 +598,21 @@ main {
     margin-bottom: 20px;
 }
 
+.theme-harry-hill {
+    object-fit: cover;
+    object-position: center 12%;
+    border-radius: 50%;
+    border: 3px solid var(--brand-yellow);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.theme-harry-hill--modal {
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 16px;
+    display: block;
+}
+
 .theme-modal-text {
     font-size: 1.25rem;
     line-height: 1.5;
@@ -616,7 +631,21 @@ main {
     padding: 16px 20px;
     border-radius: 10px;
     margin-bottom: 24px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-align: left;
+}
+
+.theme-harry-hill--banner {
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;
+}
+
+.theme-banner-content {
+    flex: 1;
+    min-width: 0;
 }
 
 .theme-banner-label {
