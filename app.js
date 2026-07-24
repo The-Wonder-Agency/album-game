@@ -294,18 +294,6 @@ async function updateNavigationVisibility() {
         }
     }
 
-    const playlistBtn = document.querySelector('.nav-btn[data-page="playlist"]');
-    if (playlistBtn) {
-        const week = Storage.getCurrentWeek();
-        const submissions = await Storage.getSubmissions(week);
-        if (submissions.length < 6) {
-            playlistBtn.disabled = true;
-            playlistBtn.title = `Available once 6 albums are submitted (${submissions.length}/6)`;
-        } else {
-            playlistBtn.disabled = false;
-            playlistBtn.removeAttribute('title');
-        }
-    }
 }
 
 function setupNavigation() {
@@ -330,14 +318,6 @@ async function navigateToPage(page) {
     if (page === 'results' && !(await canViewResultsForCurrentWeek())) {
         return;
     }
-    if (page === 'playlist') {
-        const week = Storage.getCurrentWeek();
-        const submissions = await Storage.getSubmissions(week);
-        if (submissions.length < 6) {
-            return; // Playlist requires at least 6 submissions
-        }
-    }
-
     currentPage = page;
 
     // Update active nav button
@@ -403,23 +383,8 @@ async function renderPage(page) {
                 mainContent.innerHTML = await renderStatsPage();
                 break;
             case 'playlist':
-                {
-                    const week = Storage.getCurrentWeek();
-                    const submissions = await Storage.getSubmissions(week);
-                    if (submissions.length < 6) {
-                        mainContent.innerHTML = `
-                            <div class="page active">
-                                <h2 class="page-title">Spotify Playlist</h2>
-                                <div class="empty-state">
-                                    <p>The playlist is available once at least 6 albums have been submitted this week (${submissions.length}/6).</p>
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        mainContent.innerHTML = await renderPlaylistPage();
-                        setupPlaylistPage();
-                    }
-                }
+                mainContent.innerHTML = await renderPlaylistPage();
+                setupPlaylistPage();
                 break;
             case 'admin':
                 mainContent.innerHTML = await renderAdminPage();
