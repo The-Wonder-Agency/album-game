@@ -28,11 +28,28 @@ const ThemeGenerator = {
         'album_starts_with',
         'artist_starts_with',
         'release_year',
-        'release_decade'
+        'release_decade',
+        'genre'
     ],
 
     COMMON_THEME_WEIGHT: 7,
     RARE_THEME_WEIGHT: 1,
+
+    GENRES: [
+        'rock',
+        'pop',
+        'hip-hop',
+        'country',
+        'electronic',
+        'metal',
+        'punk',
+        'R&B',
+        'soul',
+        'folk',
+        'indie',
+        'blues',
+        'dance'
+    ],
 
     LETTER_WEIGHTS: {
         A: 8, B: 6, C: 8, D: 6, E: 2, F: 5, G: 4, H: 4, I: 2, J: 2, K: 2,
@@ -93,6 +110,11 @@ const ThemeGenerator = {
                 return `Album released in ${params.year}`;
             case 'release_decade':
                 return `Album released in the ${params.decade}`;
+            case 'genre': {
+                const genre = params.genre;
+                const article = /^[aeiou]/i.test(genre) ? 'An' : 'A';
+                return `${article} ${genre} album`;
+            }
             case 'colour_in_name':
                 return 'Album with a colour in the name';
             case 'number_in_title':
@@ -147,6 +169,8 @@ const ThemeGenerator = {
                 return { year: this.pickReleaseYear() };
             case 'release_decade':
                 return { decade: this.pickRandom(this.DECADES) };
+            case 'genre':
+                return { genre: this.pickRandom(this.GENRES) };
             case 'short_title':
                 return { maxWords: this.pickRandomInt(1, 3) };
             case 'long_title':
