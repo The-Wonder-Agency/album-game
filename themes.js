@@ -11,7 +11,10 @@ const ThemeGenerator = {
         'contains_part_vol',
         'contains_roman_numeral',
         'self_titled',
-        'soundtrack_or_compilation',
+        'video_game_soundtrack',
+        'film_tv_soundtrack',
+        'compilation_one_artist',
+        'compilation_multiple_artists',
         'contains_deluxe',
         'animal_in_title',
         'place_in_title',
@@ -82,22 +85,82 @@ const ThemeGenerator = {
         return this.pickRandomInt(1980, currentYear);
     },
 
-    pickWeightedThemeId() {
+    parseWeekKey(weekKey) {
+        const [d, m, y] = weekKey.split('/').map(Number);
+        return new Date(y, m - 1, d).getTime();
+    },
+
+    getSortedThemeWeeks(themes) {
+        return Object.keys(themes || {}).sort(
+            (a, b) => this.parseWeekKey(a) - this.parseWeekKey(b)
+        );
+    },
+
+    getRecentThemeIds(themes, currentWeekKey) {
+        const cooldownWeeks = this.COMMON_THEME_IDS.length;
+        const sorted = this.getSortedThemeWeeks(themes).filter(week => week !== currentWeekKey);
+        const currentIndex = sorted.indexOf(currentWeekKey);
+        const priorWeeks = currentIndex === -1 ? sorted : sorted.slice(0, currentIndex);
+        const recentWeeks = priorWeeks.slice(-cooldownWeeks);
+        const ids = new Set();
+
+        recentWeeks.forEach(week => {
+            const theme = themes[week];
+            if (theme?.id) {
+                ids.add(theme.id);
+            }
+        });
+
+        return ids;
+    },
+
+    pickLeastRecentlyUsedThemeId(themeIds, themes, currentWeekKey) {
+        const sorted = this.getSortedThemeWeeks(themes).filter(week => week !== currentWeekKey);
+        const lastUsed = new Map();
+
+        sorted.forEach(week => {
+            const theme = themes[week];
+            if (theme?.id && themeIds.includes(theme.id)) {
+                lastUsed.set(theme.id, week);
+            }
+        });
+
+        return [...themeIds].sort((a, b) => {
+            const aUsed = lastUsed.has(a);
+            const bUsed = lastUsed.has(b);
+            if (!aUsed && !bUsed) {
+                return themeIds.indexOf(a) - themeIds.indexOf(b);
+            }
+            if (!aUsed) return -1;
+            if (!bUsed) return 1;
+            return this.parseWeekKey(lastUsed.get(a)) - this.parseWeekKey(lastUsed.get(b));
+        })[0];
+    },
+
+    pickThemeId(themes, currentWeekKey) {
+        const blockedIds = this.getRecentThemeIds(themes, currentWeekKey);
+        const availableCommon = this.COMMON_THEME_IDS.filter(id => !blockedIds.has(id));
+        const availableRare = this.RARE_THEME_IDS.filter(id => !blockedIds.has(id));
         const pool = [];
 
-        this.COMMON_THEME_IDS.forEach(id => {
+        availableCommon.forEach(id => {
             for (let i = 0; i < this.COMMON_THEME_WEIGHT; i++) {
                 pool.push(id);
             }
         });
 
-        this.RARE_THEME_IDS.forEach(id => {
+        availableRare.forEach(id => {
             for (let i = 0; i < this.RARE_THEME_WEIGHT; i++) {
                 pool.push(id);
             }
         });
 
-        return this.pickRandom(pool);
+        if (pool.length > 0) {
+            return this.pickRandom(pool);
+        }
+
+        const allIds = [...this.COMMON_THEME_IDS, ...this.RARE_THEME_IDS];
+        return this.pickLeastRecentlyUsedThemeId(allIds, themes, currentWeekKey);
     },
 
     buildText(id, params) {
@@ -133,8 +196,14 @@ const ThemeGenerator = {
                 return 'Album with a Roman numeral in the title (II, III, IV, etc.)';
             case 'self_titled':
                 return 'Self-titled album (album name matches artist name)';
-            case 'soundtrack_or_compilation':
-                return 'Soundtrack or compilation album';
+            case 'video_game_soundtrack':
+                return 'Video game soundtrack';
+            case 'film_tv_soundtrack':
+                return 'Film or TV soundtrack';
+            case 'compilation_one_artist':
+                return 'Compilation album by one artist';
+            case 'compilation_multiple_artists':
+                return 'Compilation album featuring multiple artists';
             case 'contains_deluxe':
                 return 'Album with "Deluxe" or "Remix" in the title';
             case 'animal_in_title':
@@ -180,8 +249,8 @@ const ThemeGenerator = {
         }
     },
 
-    generateTheme() {
-        const id = this.pickWeightedThemeId();
+    generateTheme(themes = {}, currentWeekKey = '') {
+        const id = this.pickThemeId(themes, currentWeekKey);
         const params = this.generateParams(id);
         return {
             id,
