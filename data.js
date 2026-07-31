@@ -787,7 +787,7 @@ const Storage = {
                 return data.themes[weekKey];
             }
 
-            const theme = ThemeGenerator.generateTheme(data.themes, weekKey);
+            const theme = ThemeGenerator.generateTheme(data.themes, weekKey, data.teamMembers || []);
             data.themes[weekKey] = theme;
             await this.saveData(data);
 
