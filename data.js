@@ -71,6 +71,59 @@ const Storage = {
         return `${dayStr}/${monthStr}/${yearStr}`;
     },
 
+    // Local calendar day as DD/MM/YYYY (for game-day overrides)
+    getTodayKey() {
+        const now = new Date();
+        const dayStr = String(now.getDate()).padStart(2, '0');
+        const monthStr = String(now.getMonth() + 1).padStart(2, '0');
+        const yearStr = now.getFullYear();
+        return `${dayStr}/${monthStr}/${yearStr}`;
+    },
+
+    isFriday() {
+        return new Date().getDay() === 5;
+    },
+
+    // Friday always counts; otherwise only the admin-enabled calendar day for this week
+    async isGameDay(week = null) {
+        if (this.isFriday()) return true;
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getData();
+        return data.gameDayOverrides?.[weekKey] === this.getTodayKey();
+    },
+
+    async getGameDayOverride(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getData();
+        return data.gameDayOverrides?.[weekKey] || null;
+    },
+
+    async enableGameDayToday(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const today = this.getTodayKey();
+        const data = await this.getFreshData();
+        if (!data.gameDayOverrides) {
+            data.gameDayOverrides = {};
+        }
+        data.gameDayOverrides[weekKey] = today;
+        const result = await this.saveData(data);
+        if (result.success) {
+            return { success: true, day: today, week: weekKey };
+        }
+        return { success: false, error: result.error || 'Failed to save game day override.' };
+    },
+
+    async clearGameDayOverride(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getFreshData();
+        if (!data.gameDayOverrides) {
+            data.gameDayOverrides = {};
+        }
+        delete data.gameDayOverrides[weekKey];
+        await this.saveData(data);
+        return { success: true };
+    },
+
     // Get formatted date string for display
     getFormattedDate() {
         return this.getCurrentWeek();
@@ -84,6 +137,7 @@ const Storage = {
             guesses: {}, // { week: [guesses] }
             finalizedGuesses: {}, // { week: [guesser names] }
             themes: {}, // { week: { id, params, text } }
+            gameDayOverrides: {}, // { week: DD/MM/YYYY } admin-enabled early game day
             adminPassword: 'admin',
             lastUpdated: new Date().toISOString()
         };
@@ -188,6 +242,12 @@ const Storage = {
             data.themes = JSON.parse(themes);
         }
 
+        // Game day overrides
+        const gameDayOverrides = localStorage.getItem('gameDayOverrides');
+        if (gameDayOverrides) {
+            data.gameDayOverrides = JSON.parse(gameDayOverrides);
+        }
+
         // Admin password
         const adminPwd = localStorage.getItem('adminPassword');
         if (adminPwd) {
@@ -243,6 +303,11 @@ const Storage = {
         // Themes
         if (data.themes) {
             localStorage.setItem('themes', JSON.stringify(data.themes));
+        }
+
+        // Game day overrides
+        if (data.gameDayOverrides) {
+            localStorage.setItem('gameDayOverrides', JSON.stringify(data.gameDayOverrides));
         }
 
         // Admin password
@@ -395,6 +460,11 @@ const Storage = {
 
     async addSubmission(artist, album, url, submitter) {
         const week = this.getCurrentWeek();
+
+        if (!(await this.isGameDay(week))) {
+            return { success: false, message: 'Albums can only be submitted on Friday (or an admin-enabled game day).' };
+        }
+
         const data = await this.getFreshData();
         
         if (!data.submissions) {

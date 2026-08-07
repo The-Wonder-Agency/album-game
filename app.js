@@ -65,10 +65,14 @@ async function initializeApp() {
     // Update navigation visibility
     await updateNavigationVisibility();
 
-    // Ensure weekly theme exists and show popup if first visit this week
+    // Ensure weekly theme exists and show popup only on game day (Friday or admin override)
     try {
-        currentWeekTheme = await Storage.ensureWeekTheme();
-        showThemePopupIfNeeded();
+        if (await Storage.isGameDay()) {
+            currentWeekTheme = await Storage.ensureWeekTheme();
+            showThemePopupIfNeeded();
+        } else {
+            currentWeekTheme = await Storage.getWeekTheme();
+        }
     } catch (error) {
         console.error('Error loading weekly theme:', error);
     }
@@ -214,6 +218,7 @@ function isWeekResultsRevealed(weekStr) {
 
 function showThemePopupIfNeeded() {
     if (!currentWeekTheme) return;
+    if (document.getElementById('theme-modal-backdrop')) return;
 
     const week = Storage.getCurrentWeek();
     const seenKey = `themePopupSeen_${week}`;
@@ -385,6 +390,16 @@ async function renderPage(page) {
             case 'submit':
                 mainContent.innerHTML = await renderSubmitPage();
                 setupSubmitPage();
+                if (await Storage.isGameDay()) {
+                    if (!currentWeekTheme) {
+                        try {
+                            currentWeekTheme = await Storage.ensureWeekTheme();
+                        } catch (error) {
+                            console.error('Error ensuring weekly theme:', error);
+                        }
+                    }
+                    showThemePopupIfNeeded();
+                }
                 break;
             case 'guess':
                 if (isBeforeMidday()) {
@@ -475,63 +490,70 @@ async function renderPage(page) {
 // Submit Page
 async function renderSubmitPage() {
     const week = Storage.getCurrentWeek();
+    const isGameDay = await Storage.isGameDay(week);
     const submissions = await Storage.getSubmissions(week);
     const members = await Storage.getTeamMembers();
     const userSubmissions = submissions.filter(s => s.submitter === currentGuesser);
     const remaining = 1 - userSubmissions.length;
 
+    if (isGameDay && !currentWeekTheme) {
+        try {
+            currentWeekTheme = await Storage.ensureWeekTheme(week);
+        } catch (error) {
+            console.error('Error ensuring weekly theme:', error);
+        }
+    }
+
     return `
         <div class="page active">
             <h2 class="page-title">Submit Albums</h2>
-            ${renderThemeBanner()}
+            ${isGameDay ? renderThemeBanner() : ''}
+            ${!isGameDay ? `
+                <div class="alert alert-info">
+                    <p>Album submissions open on Friday. An admin can enable game day early if you&rsquo;re playing on a different day this week.</p>
+                </div>
+            ` : ''}
             ${members.length === 0 ? `
                 <div class="alert alert-info">
                     <p>No team members have been added yet. Please ask an admin to add team members first.</p>
                 </div>
             ` : ''}
-            ${!currentGuesser ? `
+            ${isGameDay && members.length > 0 && !currentGuesser ? `
                 <div class="form-group">
                     <label for="guesser-name">Your Name:</label>
                     <select id="guesser-name" required>
                         <option value="">Select your name...</option>
                         ${members.map(m => `
-                            <option value="${m}" ${m === currentGuesser ? 'selected' : ''}>${m}</option>
+                            <option value="${m}">${m}</option>
                         `).join('')}
                     </select>
                 </div>
-            ` : `
+            ` : ''}
+            ${isGameDay && currentGuesser ? `
                 <div class="submission-count">Submissions this week: ${userSubmissions.length}/1</div>
-            `}
-            ${remaining > 0 && members.length > 0 ? `
-                <form id="submit-form">
-                    <div class="form-group">
-                        <label for="submitter-name">Your Name:</label>
-                        <select id="submitter-name" required>
-                            <option value="">Select your name...</option>
-                            ${members.map(m => `
-                                <option value="${m}" ${m === currentGuesser ? 'selected' : ''}>${m}</option>
-                            `).join('')}
-                        </select>
+                ${remaining > 0 ? `
+                    <form id="submit-form">
+                        <input type="hidden" id="submitter-name" value="${escapeHtml(currentGuesser)}">
+                        <div class="form-group">
+                            <label for="artist">Artist Name:</label>
+                            <input type="text" id="artist" placeholder="Enter artist name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="album">Album Name:</label>
+                            <input type="text" id="album" placeholder="Enter album name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="url">Spotify URL (optional):</label>
+                            <input type="url" id="url" placeholder="https://open.spotify.com/album/...">
+                        </div>
+                        <button type="submit" class="btn">Submit Album</button>
+                    </form>
+                ` : `
+                    <div class="alert alert-info">
+                        You have already submitted your album this week. Check back next week!
                     </div>
-                    <div class="form-group">
-                        <label for="artist">Artist Name:</label>
-                        <input type="text" id="artist" placeholder="Enter artist name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="album">Album Name:</label>
-                        <input type="text" id="album" placeholder="Enter album name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="url">Spotify URL (optional):</label>
-                        <input type="url" id="url" placeholder="https://open.spotify.com/album/...">
-                    </div>
-                    <button type="submit" class="btn">Submit Album</button>
-                </form>
-            ` : `
-                <div class="alert alert-info">
-                    You have already submitted your album this week. Check back next week!
-                </div>
-            `}
+                `}
+            ` : ''}
             ${userSubmissions.length > 0 ? `
                 <h3 style="margin-top: 30px; margin-bottom: 16px;">Your Submissions This Week:</h3>
                 ${userSubmissions.map(sub => `
@@ -548,7 +570,7 @@ async function renderSubmitPage() {
 }
 
 function setupSubmitPage() {
-    // Handle name selection dropdown (outside form)
+    // Handle name selection dropdown (shown only until a name is chosen once)
     const guesserNameSelect = document.getElementById('guesser-name');
     if (guesserNameSelect) {
         guesserNameSelect.addEventListener('change', async (e) => {
@@ -562,42 +584,25 @@ function setupSubmitPage() {
         });
     }
 
-    // Handle name selection dropdown (inside form)
-    const submitterNameSelect = document.getElementById('submitter-name');
-    if (submitterNameSelect) {
-        submitterNameSelect.addEventListener('change', async (e) => {
-            const name = e.target.value.trim();
-            if (name && name !== currentGuesser) {
-                currentGuesser = name;
-                localStorage.setItem('currentGuesser', name);
-                await updateNavigationVisibility();
-                await renderPage('submit');
-            }
-        });
-    }
-
     const form = document.getElementById('submit-form');
     if (form) {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            // Get name from either the top dropdown or the form dropdown
-            let submitterName = '';
-            const guesserNameSelect = document.getElementById('guesser-name');
-            const submitterNameSelect = document.getElementById('submitter-name');
-            
-            if (guesserNameSelect) {
-                submitterName = guesserNameSelect.value.trim();
-            } else if (submitterNameSelect) {
-                submitterName = submitterNameSelect.value.trim();
+
+            if (!(await Storage.isGameDay())) {
+                showMessage('submit-message', 'Albums can only be submitted on Friday (or an admin-enabled game day).', 'error');
+                return;
             }
+
+            const submitterNameInput = document.getElementById('submitter-name');
+            const submitterName = (submitterNameInput?.value || currentGuesser || '').trim();
             
             if (!submitterName) {
                 showMessage('submit-message', 'Please select your name.', 'error');
                 return;
             }
             
-            // Update currentGuesser if it changed
+            // Keep currentGuesser in sync
             if (submitterName !== currentGuesser) {
                 currentGuesser = submitterName;
                 localStorage.setItem('currentGuesser', submitterName);
@@ -638,6 +643,9 @@ function setupSubmitPage() {
                 if (result.success) {
                     showMessage('submit-message', result.message, 'success');
                     form.reset();
+                    // Restore hidden name after reset (reset clears hidden inputs too)
+                    const hiddenName = document.getElementById('submitter-name');
+                    if (hiddenName) hiddenName.value = submitterName;
                     await updateNavigationVisibility();
                     setTimeout(async () => {
                         await renderPage('submit');
@@ -1463,68 +1471,46 @@ async function renderPlaylistPage() {
         return match ? match[1] : null;
     };
 
-    const spotifyIds = shuffled
-        .map(sub => (sub.url && sub.url.includes('spotify.com') ? getSpotifyId(sub.url) : null))
-        .filter(id => id !== null);
-
-    // Create Spotify playlist URL
-    const playlistUrl = spotifyIds.length > 0 
-        ? `https://open.spotify.com/playlist/create?uri=${spotifyIds.map(id => `spotify:album:${id}`).join(',')}`
-        : null;
+    const withSpotify = shuffled
+        .map(sub => {
+            const spotifyId = sub.url && sub.url.includes('spotify.com') ? getSpotifyId(sub.url) : null;
+            return spotifyId ? { ...sub, spotifyId } : null;
+        })
+        .filter(Boolean);
 
     return `
         <div class="page active">
             <h2 class="page-title">Spotify Playlist</h2>
             <p style="margin-bottom: 20px; color: #666666;">
-                Week: <strong>${week}</strong> | Total Albums: ${submissions.length} | With Spotify URLs: ${spotifyIds.length}
+                Week: <strong>${week}</strong> | Total Albums: ${submissions.length} | With Spotify URLs: ${withSpotify.length}
             </p>
             <p style="margin-bottom: 16px; color: #666666; font-size: 0.95rem;">
-                Album order is randomized for this week (same order for everyone).
+                Album order is randomized for this week (same order for everyone). Add each album to your playlist without peeking at titles.
             </p>
 
-            ${spotifyIds.length > 0 ? `
+            ${withSpotify.length > 0 ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
                     <h3 style="margin-bottom: 10px;">Create Playlist</h3>
                     <p style="margin-bottom: 15px;">
-                        Use the "Open in Spotify" buttons below each album to add them to a playlist. Spotify doesn't support bulk playlist creation via URL, so you'll need to add albums one by one.
-                    </p>
-                    <p style="margin-top: 10px; font-size: 0.9rem; color: #666666;">
-                        <strong>Quick method:</strong> Click each "Open in Spotify" button, then use the "..." menu on each album page to add it to your playlist.
+                        Use the buttons below to open each album in Spotify, then use the "..." menu to add it to your playlist.
                     </p>
                 </div>
-            ` : ''}
 
-            <h3 style="margin-top: 30px; margin-bottom: 16px;">This week&rsquo;s albums</h3>
-            <div style="display: grid; gap: 15px; margin-bottom: 30px;">
-                ${shuffled.map((sub) => {
-                    const hasSpotify = sub.url && sub.url.includes('spotify.com');
-                    const spotifyId = hasSpotify ? getSpotifyId(sub.url) : null;
-                    const spotifyAlbumUrl = spotifyId ? `https://open.spotify.com/album/${spotifyId}` : (sub.url || '#');
-                    if (hasSpotify && spotifyId) {
+                <div style="display: grid; gap: 15px; margin-bottom: 30px;">
+                    ${withSpotify.map((sub) => {
+                        const spotifyAlbumUrl = `https://open.spotify.com/album/${sub.spotifyId}`;
                         return `
-                            <div class="album-card" style="display: flex; justify-content: space-between; align-items: center;">
-                                <div style="flex: 1;">
-                                    <h3 style="margin-bottom: 5px;">${sub.album}</h3>
-                                    <p style="margin-bottom: 5px;"><strong>Artist:</strong> ${sub.artist}</p>
-                                    <a href="${spotifyAlbumUrl}" target="_blank" style="color: #00a8cc; text-decoration: none;">
-                                        ${spotifyAlbumUrl}
-                                    </a>
-                                </div>
-                                <a href="${spotifyAlbumUrl}" target="_blank" class="btn btn-open-spotify" style="margin-left: 15px; text-decoration: none; color: white !important;">
-                                    Open in Spotify
-                                </a>
-                            </div>
+                            <a href="${spotifyAlbumUrl}" target="_blank" class="btn btn-open-spotify" style="text-decoration: none; color: white !important; text-align: center;">
+                                Open in Spotify
+                            </a>
                         `;
-                    }
-                    return `
-                        <div class="album-card">
-                            <h3>${sub.album}</h3>
-                            <p><strong>Artist:</strong> ${sub.artist}</p>
-                            <p style="color: #999999; font-size: 0.9rem;">No Spotify URL provided</p>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
+                    }).join('')}
+                </div>
+            ` : `
+                <div class="alert alert-info">
+                    <p>No Spotify album links were submitted this week.</p>
+                </div>
+            `}
 
             <div style="margin-top: 30px; padding: 20px; background: #fafafa; border: 2px solid #e0e0e0; border-radius: 8px;">
                 <h3 style="margin-bottom: 10px; color: #333333;">Manual Playlist Creation</h3>
@@ -1533,7 +1519,7 @@ async function renderPlaylistPage() {
                 </p>
                 <ol style="color: #666666; padding-left: 20px;">
                     <li>Open Spotify and create a new playlist</li>
-                    <li>Click on each album link above to open it in Spotify</li>
+                    <li>Click each "Open in Spotify" button above</li>
                     <li>Click the "..." menu on each album and select "Add to Playlist"</li>
                     <li>Select your new playlist</li>
                 </ol>
@@ -1571,6 +1557,10 @@ async function renderAdminPage() {
     const submissions = await Storage.getSubmissions(currentWeek);
     const guesses = await Storage.getGuesses(currentWeek);
     const weekTheme = await Storage.getWeekTheme(currentWeek);
+    const isGameDay = await Storage.isGameDay(currentWeek);
+    const gameDayOverride = await Storage.getGameDayOverride(currentWeek);
+    const todayKey = Storage.getTodayKey();
+    const isFriday = Storage.isFriday();
 
     return `
         <div class="page active">
@@ -1601,6 +1591,33 @@ async function renderAdminPage() {
                         `).join('')}
                     </ul>
                 ` : '<p>No team members yet. Add one above!</p>'}
+            </div>
+
+            <div class="admin-section">
+                <h2>Game Day</h2>
+                <p style="color: #666666; margin-bottom: 15px;">
+                    Week: <strong>${currentWeek}</strong><br>
+                    Today: <strong>${todayKey}</strong><br>
+                    Status: ${isGameDay
+                        ? (isFriday
+                            ? '<strong>Open</strong> (Friday)'
+                            : `<strong>Open</strong> (admin enabled for ${escapeHtml(gameDayOverride || todayKey)})`)
+                        : '<strong>Closed</strong> — submissions and theme appear on Friday'}
+                </p>
+                <p style="color: #666666; margin-bottom: 15px; font-size: 0.95rem;">
+                    Press the button below to let everyone submit albums and see the theme of the week today (for playing on a different day).
+                </p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn" id="enable-game-day-btn" style="background: #00a8cc;" ${isFriday || (gameDayOverride === todayKey) ? 'disabled' : ''}>
+                        ${gameDayOverride === todayKey ? 'Game Day Enabled for Today' : 'Enable Game Day Today'}
+                    </button>
+                    ${gameDayOverride ? `
+                        <button class="btn btn-secondary" id="clear-game-day-btn">
+                            Clear Early Game Day
+                        </button>
+                    ` : ''}
+                </div>
+                <div id="game-day-message" style="margin-top: 10px;"></div>
             </div>
 
             <div class="admin-section">
@@ -1811,6 +1828,58 @@ async function setupAdminPage() {
                 } catch (error) {
                     showMessage('clear-theme-message', 'Error clearing theme: ' + error.message, 'error');
                 }
+            }
+        });
+    }
+
+    const enableGameDayBtn = document.getElementById('enable-game-day-btn');
+    if (enableGameDayBtn) {
+        enableGameDayBtn.addEventListener('click', async () => {
+            if (Storage.isFriday()) {
+                showMessage('game-day-message', 'It\'s already Friday — game day is open automatically.', 'info');
+                return;
+            }
+            if (!confirm('Enable submissions and theme of the week for today? Everyone will be able to play as if it were Friday.')) {
+                return;
+            }
+            enableGameDayBtn.disabled = true;
+            enableGameDayBtn.textContent = 'Enabling...';
+            try {
+                const result = await Storage.enableGameDayToday();
+                if (!result.success) {
+                    showMessage('game-day-message', result.error || 'Failed to enable game day.', 'error');
+                    return;
+                }
+                currentWeekTheme = await Storage.ensureWeekTheme();
+                localStorage.removeItem(`themePopupSeen_${Storage.getCurrentWeek()}`);
+                showThemePopupIfNeeded();
+                showMessage('game-day-message', `Game day enabled for ${result.day}. Theme and submissions are now open.`, 'success');
+                setTimeout(async () => {
+                    await renderPage('admin');
+                }, 1000);
+            } catch (error) {
+                showMessage('game-day-message', 'Error enabling game day: ' + error.message, 'error');
+            } finally {
+                enableGameDayBtn.disabled = false;
+                enableGameDayBtn.textContent = 'Enable Game Day Today';
+            }
+        });
+    }
+
+    const clearGameDayBtn = document.getElementById('clear-game-day-btn');
+    if (clearGameDayBtn) {
+        clearGameDayBtn.addEventListener('click', async () => {
+            if (!confirm('Clear the early game day override for this week? Submissions and theme will close until Friday (unless you enable again).')) {
+                return;
+            }
+            try {
+                await Storage.clearGameDayOverride();
+                showMessage('game-day-message', 'Early game day cleared.', 'success');
+                setTimeout(async () => {
+                    await renderPage('admin');
+                }, 1000);
+            } catch (error) {
+                showMessage('game-day-message', 'Error clearing game day: ' + error.message, 'error');
             }
         });
     }
