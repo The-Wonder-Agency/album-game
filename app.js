@@ -183,37 +183,60 @@ async function checkUrlParameters() {
     }
 }
 
-function isBeforeMidday() {
+function isBeforeGuessTime() {
     const now = new Date();
     return now.getHours() < 10 || (now.getHours() === 10 && now.getMinutes() < 30);
 }
 
-/** Friday 4pm when results/stats for the active game week are revealed. */
-function getActiveGameWeekRevealTime() {
+function isBeforeMidday() {
     const now = new Date();
-    const day = now.getDay();
-    let daysToFriday;
-    if (day === 6) {
-        daysToFriday = -1;
-    } else if (day === 0) {
-        daysToFriday = -2;
-    } else {
-        daysToFriday = 5 - day;
-    }
-    const reveal = new Date(now);
-    reveal.setDate(now.getDate() + daysToFriday);
-    reveal.setHours(16, 0, 0, 0);
-    return reveal;
+    return now.getHours() < 12;
 }
 
-function isBeforeResultsReveal() {
-    return new Date() < getActiveGameWeekRevealTime();
-}
-
-function isWeekResultsRevealed(weekStr) {
+/** Midday on the Friday that identifies a game week (weekStr is DD/MM/YYYY). */
+function getWeekFridayMidday(weekStr) {
     const [d, m, y] = weekStr.split('/').map(Number);
-    const revealTime = new Date(y, m - 1, d, 16, 0, 0, 0);
-    return new Date() >= revealTime;
+    return new Date(y, m - 1, d, 12, 0, 0, 0);
+}
+
+function isAfterMiddayOnWeekFriday(weekStr) {
+    return new Date() >= getWeekFridayMidday(weekStr);
+}
+
+async function getPendingGuessers(week) {
+    const submissions = await Storage.getSubmissions(week);
+    const submitters = [...new Set(submissions.map(s => s.submitter))];
+    if (submitters.length === 0) return [];
+    const data = await Storage.getData();
+    const finalized = data.finalizedGuesses?.[week] || [];
+    return submitters.filter(name => !finalized.includes(name));
+}
+
+async function isWeekResultsRevealed(weekStr) {
+    const submissions = await Storage.getSubmissions(weekStr);
+    if (submissions.length === 0) return false;
+    if (!isAfterMiddayOnWeekFriday(weekStr)) return false;
+    const pending = await getPendingGuessers(weekStr);
+    return pending.length === 0;
+}
+
+async function renderResultsWaitingMessage(week) {
+    const pending = await getPendingGuessers(week);
+    const afterMiddayFriday = isAfterMiddayOnWeekFriday(week);
+    const submissions = await Storage.getSubmissions(week);
+
+    if (submissions.length === 0) {
+        return '<p>No submissions for this week yet.</p>';
+    }
+
+    let html = '<p>Results will be revealed at midday on Friday, once everyone has submitted their guesses.</p>';
+    if (pending.length > 0) {
+        const peopleWord = pending.length === 1 ? 'person' : 'people';
+        html += `<p><strong>Still waiting on guesses from ${pending.length} ${peopleWord}:</strong> ${pending.map(p => escapeHtml(p)).join(', ')}.</p>`;
+    } else if (!afterMiddayFriday) {
+        html += '<p>Check back after midday on Friday.</p>';
+    }
+    return html;
 }
 
 function showThemePopupIfNeeded() {
@@ -287,12 +310,6 @@ function seededShuffle(array, seedKey) {
     return arr;
 }
 
-async function areResultsAndStatsAvailable() {
-    if (!isBeforeResultsReveal()) return true;
-    const weeks = await Storage.getAllWeeks();
-    return weeks.some(w => isWeekResultsRevealed(w));
-}
-
 async function updateNavigationVisibility() {
     const settingsBtn = document.querySelector('.nav-btn[data-page="settings"]');
     if (settingsBtn) {
@@ -305,7 +322,7 @@ async function updateNavigationVisibility() {
 
     const guessBtn = document.querySelector('.nav-btn[data-page="guess"]');
     if (guessBtn) {
-        if (isBeforeMidday()) {
+        if (isBeforeGuessTime()) {
             guessBtn.disabled = true;
             guessBtn.title = 'Available from 10:30';
         } else {
@@ -318,10 +335,7 @@ async function updateNavigationVisibility() {
     if (resultsBtn) {
         if (isBeforeMidday()) {
             resultsBtn.disabled = true;
-            resultsBtn.title = 'Available from 10:30';
-        } else if (!(await areResultsAndStatsAvailable())) {
-            resultsBtn.disabled = true;
-            resultsBtn.title = 'Available from 4pm on Friday';
+            resultsBtn.title = 'Available from midday';
         } else {
             resultsBtn.disabled = false;
             resultsBtn.removeAttribute('title');
@@ -332,10 +346,7 @@ async function updateNavigationVisibility() {
     if (statsBtn) {
         if (isBeforeMidday()) {
             statsBtn.disabled = true;
-            statsBtn.title = 'Available from 10:30';
-        } else if (!(await areResultsAndStatsAvailable())) {
-            statsBtn.disabled = true;
-            statsBtn.title = 'Available from 4pm on Friday';
+            statsBtn.title = 'Available from midday';
         } else {
             statsBtn.disabled = false;
             statsBtn.removeAttribute('title');
@@ -357,16 +368,13 @@ function setupNavigation() {
 async function navigateToPage(page) {
     await updateNavigationVisibility();
 
-    if (page === 'guess' && isBeforeMidday()) {
+    if (page === 'guess' && isBeforeGuessTime()) {
         return; // Guess button is disabled, but guard in case of hash/navigation
     }
     if (page === 'results' && isBeforeMidday()) {
         return; // Results button is disabled, but guard in case of hash/navigation
     }
     if (page === 'stats' && isBeforeMidday()) {
-        return;
-    }
-    if ((page === 'results' || page === 'stats') && !(await areResultsAndStatsAvailable())) {
         return;
     }
     currentPage = page;
@@ -402,7 +410,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'guess':
-                if (isBeforeMidday()) {
+                if (isBeforeGuessTime()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Guess</h2>
@@ -422,16 +430,7 @@ async function renderPage(page) {
                         <div class="page active">
                             <h2 class="page-title">Results</h2>
                             <div class="empty-state">
-                                <p>Results are available from 10:30. Check back later!</p>
-                            </div>
-                        </div>
-                    `;
-                } else if (!(await areResultsAndStatsAvailable())) {
-                    mainContent.innerHTML = `
-                        <div class="page active">
-                            <h2 class="page-title">Results</h2>
-                            <div class="empty-state">
-                                <p>Results are revealed at 4pm on Friday. Check back then!</p>
+                                <p>Results are available from midday. Check back later!</p>
                             </div>
                         </div>
                     `;
@@ -446,16 +445,7 @@ async function renderPage(page) {
                         <div class="page active">
                             <h2 class="page-title">Stats</h2>
                             <div class="empty-state">
-                                <p>Stats are available from 10:30. Check back later!</p>
-                            </div>
-                        </div>
-                    `;
-                } else if (!(await areResultsAndStatsAvailable())) {
-                    mainContent.innerHTML = `
-                        <div class="page active">
-                            <h2 class="page-title">Stats</h2>
-                            <div class="empty-state">
-                                <p>Stats are revealed at 4pm on Friday. Check back then!</p>
+                                <p>Stats are available from midday. Check back later!</p>
                             </div>
                         </div>
                     `;
@@ -737,6 +727,7 @@ async function renderGuessPage() {
 
     // Check if guesses are finalized
     const guessesFinalized = currentGuesser ? await Storage.areGuessesFinalized(currentGuesser) : false;
+    const resultsRevealed = await isWeekResultsRevealed(week);
 
     // Get existing guesses for this guesser, grouped by album key
     const existingGuessesByAlbum = {};
@@ -754,7 +745,7 @@ async function renderGuessPage() {
             <h2 class="page-title">Guess Who Submitted What</h2>
             ${guessesFinalized ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
-                    <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.${isBeforeResultsReveal() ? ' Results and stats will be revealed at 4pm on Friday.' : ''}</p>
+                    <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.${!resultsRevealed ? ' Results will be revealed at midday on Friday, once everyone has submitted their guesses.' : ''}</p>
                 </div>
             ` : ''}
             ${hasDuplicates ? `
@@ -945,7 +936,7 @@ function setupGuessPage() {
 
                     await updateNavigationVisibility();
                     await renderPage('guess');
-                    showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at 4pm on Friday.', 'success');
+                    showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at midday on Friday, once everyone has submitted their guesses.', 'success');
                 } catch (error) {
                     console.error('Error saving guesses:', error);
                     showMessage('guess-message', 'Error saving guesses: ' + error.message, 'error');
@@ -1102,8 +1093,16 @@ function setupGuessPage() {
 
 // Results Page
 async function renderResultsPage() {
-    const weeks = await Storage.getAllWeeks();
     const currentWeek = Storage.getCurrentWeek();
+    const allWeeks = await Storage.getAllWeeks();
+    const weekSet = new Set([...allWeeks, currentWeek]);
+    const weeks = [...weekSet].sort((a, b) => {
+        const parse = (s) => {
+            const [d, m, y] = s.split('/').map(Number);
+            return new Date(y, m - 1, d).getTime();
+        };
+        return parse(b) - parse(a);
+    });
     
     return `
         <div class="page active">
@@ -1124,11 +1123,7 @@ async function renderResultsPage() {
 }
 
 async function setupResultsPage() {
-    const weeks = await Storage.getAllWeeks();
-    const revealedWeeks = weeks.filter(w => isWeekResultsRevealed(w));
-    if (!isWeekResultsRevealed(selectedWeek) && revealedWeeks.length > 0) {
-        selectedWeek = revealedWeeks[revealedWeeks.length - 1];
-    }
+    selectedWeek = Storage.getCurrentWeek();
 
     const weekSelector = document.getElementById('week-selector');
     if (weekSelector) {
@@ -1147,14 +1142,8 @@ async function renderResultsContent(week) {
     
     if (!content) return;
 
-    if (!isWeekResultsRevealed(week)) {
-        content.innerHTML = '<div class="empty-state"><p>Results for this week are revealed at 4pm on Friday. Check back then!</p></div>';
-        return;
-    }
-
-    const currentWeek = Storage.getCurrentWeek();
-    if (week === currentWeek && currentGuesser && !(await Storage.areGuessesFinalized(currentGuesser))) {
-        content.innerHTML = '<div class="empty-state"><p>Save and finalize your guesses on the Guess page to see this week\'s results.</p></div>';
+    if (!(await isWeekResultsRevealed(week))) {
+        content.innerHTML = `<div class="empty-state">${await renderResultsWaitingMessage(week)}</div>`;
         return;
     }
     
@@ -1278,15 +1267,23 @@ async function renderResultsContent(week) {
 
 // Stats Page
 async function renderStatsPage() {
-    const weeks = (await Storage.getAllWeeks()).filter(w => isWeekResultsRevealed(w));
+    const allWeeks = await Storage.getAllWeeks();
+    const weeks = [];
+    for (const w of allWeeks) {
+        if (await isWeekResultsRevealed(w)) {
+            weeks.push(w);
+        }
+    }
     const members = await Storage.getTeamMembers();
 
     if (weeks.length === 0) {
+        const currentWeek = Storage.getCurrentWeek();
+        const waitingMessage = await renderResultsWaitingMessage(currentWeek);
         return `
             <div class="page active">
                 <h2 class="page-title">Stats</h2>
                 <div class="empty-state">
-                    <p>${isBeforeResultsReveal() ? 'Stats for this week will be revealed at 4pm on Friday.' : 'No stats available yet. Start playing to see your stats!'}</p>
+                    ${waitingMessage}
                 </div>
             </div>
         `;
