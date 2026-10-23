@@ -199,8 +199,17 @@ function getWeekFridayMidday(weekStr) {
     return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
 
+function getWeekFriday4pm(weekStr) {
+    const [d, m, y] = weekStr.split('/').map(Number);
+    return new Date(y, m - 1, d, 16, 0, 0, 0);
+}
+
 function isAfterMiddayOnWeekFriday(weekStr) {
     return new Date() >= getWeekFridayMidday(weekStr);
+}
+
+function isAfter4pmOnWeekFriday(weekStr) {
+    return new Date() >= getWeekFriday4pm(weekStr);
 }
 
 async function getPendingGuessers(week) {
@@ -215,26 +224,40 @@ async function getPendingGuessers(week) {
 async function isWeekResultsRevealed(weekStr) {
     const submissions = await Storage.getSubmissions(weekStr);
     if (submissions.length === 0) return false;
-    if (!isAfterMiddayOnWeekFriday(weekStr)) return false;
+
     const pending = await getPendingGuessers(weekStr);
-    return pending.length === 0;
+    const now = new Date();
+
+    if (pending.length === 0) {
+        return now >= getWeekFridayMidday(weekStr);
+    }
+    return now >= getWeekFriday4pm(weekStr);
 }
 
 async function renderResultsWaitingMessage(week) {
     const pending = await getPendingGuessers(week);
     const afterMiddayFriday = isAfterMiddayOnWeekFriday(week);
+    const after4pmFriday = isAfter4pmOnWeekFriday(week);
     const submissions = await Storage.getSubmissions(week);
 
     if (submissions.length === 0) {
         return '<p>No submissions for this week yet.</p>';
     }
 
-    let html = '<p>Results will be revealed at midday on Friday, once everyone has submitted their guesses.</p>';
-    if (pending.length > 0) {
-        const peopleWord = pending.length === 1 ? 'person' : 'people';
-        html += `<p><strong>Still waiting on guesses from ${pending.length} ${peopleWord}:</strong> ${pending.map(p => escapeHtml(p)).join(', ')}.</p>`;
-    } else if (!afterMiddayFriday) {
+    const pendingLine = pending.length > 0
+        ? `<p><strong>Still waiting on guesses from ${pending.length} ${pending.length === 1 ? 'person' : 'people'}:</strong> ${pending.map(p => escapeHtml(p)).join(', ')}.</p>`
+        : '';
+
+    if (pending.length > 0 && afterMiddayFriday && !after4pmFriday) {
+        return `<p>Results will be revealed at 4pm on Friday if guesses are still outstanding.</p>${pendingLine}`;
+    }
+
+    let html = '<p>Results will be revealed at midday on Friday once everyone has submitted their guesses, or at 4pm on Friday if anyone is still outstanding.</p>';
+    html += pendingLine;
+    if (!afterMiddayFriday && pending.length === 0) {
         html += '<p>Check back after midday on Friday.</p>';
+    } else if (!afterMiddayFriday) {
+        html += '<p>If everyone has guessed by then, results will appear at midday; otherwise at 4pm.</p>';
     }
     return html;
 }
@@ -745,7 +768,7 @@ async function renderGuessPage() {
             <h2 class="page-title">Guess Who Submitted What</h2>
             ${guessesFinalized ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
-                    <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.${!resultsRevealed ? ' Results will be revealed at midday on Friday, once everyone has submitted their guesses.' : ''}</p>
+                    <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.${!resultsRevealed ? ' Results will be revealed at midday on Friday once everyone has guessed, or at 4pm if anyone is still outstanding.' : ''}</p>
                 </div>
             ` : ''}
             ${hasDuplicates ? `
@@ -936,7 +959,7 @@ function setupGuessPage() {
 
                     await updateNavigationVisibility();
                     await renderPage('guess');
-                    showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at midday on Friday, once everyone has submitted their guesses.', 'success');
+                    showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at midday on Friday once everyone has guessed, or at 4pm if anyone is still outstanding.', 'success');
                 } catch (error) {
                     console.error('Error saving guesses:', error);
                     showMessage('guess-message', 'Error saving guesses: ' + error.message, 'error');
