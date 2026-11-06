@@ -303,6 +303,126 @@ main {
     border-left: 4px solid var(--brand-blue);
 }
 
+.result-item--pending:not(.correct):not(.incorrect) {
+    border-left-color: var(--border-light);
+}
+
+/* Family Fortunes: board covers card until reveal */
+.result-item--fortunes .fortunes-card-shell {
+    position: relative;
+    min-height: 140px;
+}
+
+.result-item--fortunes .fortunes-card-content {
+    position: relative;
+    z-index: 0;
+}
+
+.result-item--fortunes.result-item--pending:not(.result-item--revealed) .fortunes-card-content {
+    filter: blur(8px);
+    opacity: 0.25;
+    pointer-events: none;
+    user-select: none;
+}
+
+.result-item--fortunes.result-item--revealed .fortunes-card-content {
+    filter: none;
+    opacity: 1;
+    pointer-events: auto;
+    user-select: auto;
+}
+
+.result-item--fortunes .fortunes-card-board {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px;
+    border-radius: 6px;
+    background: linear-gradient(160deg, #1a237e 0%, #283593 40%, #3949ab 100%);
+    color: #fff;
+    text-align: center;
+    box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.12), 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.result-item--fortunes .fortunes-board-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border: 2px solid rgba(255, 235, 59, 0.45);
+}
+
+.result-item--fortunes .fortunes-board-les {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    flex-shrink: 0;
+}
+
+.result-item--fortunes .fortunes-board-copy {
+    text-align: left;
+}
+
+.result-item--fortunes .fortunes-board-kicker {
+    display: block;
+    font-weight: 800;
+    font-size: 1rem;
+    letter-spacing: 0.02em;
+}
+
+.result-item--fortunes .fortunes-board-round {
+    display: block;
+    font-size: 0.85rem;
+    opacity: 0.9;
+    margin-top: 2px;
+}
+
+.result-item--fortunes .fortunes-board-hint {
+    margin: 0;
+    font-size: 0.88rem;
+    opacity: 0.9;
+    max-width: 280px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fortunes-card-board--lifting {
+        animation: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+    }
+}
+
+.fortunes-card-board--lifting {
+    animation: fortunesBoardLift 0.45s ease-in forwards;
+}
+
+@keyframes fortunesBoardLift {
+    0% {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: translateY(-18%) scale(0.94);
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .result-item--pending,
+    .result-reveal-line {
+        transition: none !important;
+    }
+}
+
 .result-item.correct {
     border-left-color: var(--brand-blue);
 }
@@ -321,6 +441,112 @@ main {
     margin-bottom: 6px;
     color: var(--text-primary);
     opacity: 0.9;
+}
+
+/* Family Fortunes–style results reveal */
+.fortunes-reveal-wrap {
+    margin-top: 8px;
+}
+
+/* Catchphrase panel + Spotify oEmbed artwork (guess page) */
+.catchphrase-art-cell {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.catchphrase-panel {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(25, 118, 210, 0.1), rgba(156, 39, 176, 0.08));
+    border: 2px solid rgba(38, 84, 118, 0.25);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.catchphrase-art-wrap {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #111;
+    border: 3px solid #f5d742;
+    box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+.results-catchphrase .catchphrase-art-wrap {
+    width: 100px;
+    height: 100px;
+}
+
+.catchphrase-art-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 0.35);
+    user-select: none;
+}
+
+.catchphrase-album-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.catchphrase-copy {
+    min-width: 0;
+}
+
+.catchphrase-say-what {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #c62828;
+    margin-bottom: 6px;
+}
+
+.catchphrase-title-line {
+    margin: 0 0 4px 0;
+    font-size: 1rem;
+}
+
+.catchphrase-artist-line {
+    margin: 0;
+    font-size: 0.9rem;
+    opacity: 0.85;
+}
+
+.catchphrase-roy-host {
+    align-self: flex-end;
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 10px;
+    flex-shrink: 0;
+    border: 2px solid rgba(245, 215, 66, 0.6);
+}
+
+.results-catchphrase .catchphrase-roy-host {
+    width: 56px;
+    height: 56px;
+}
+
+.album-card .catchphrase-art-cell {
+    margin-bottom: 14px;
 }
 
 .leaderboard {
@@ -788,4 +1014,298 @@ main {
     .week-by-week-grid {
         grid-template-columns: 1fr;
     }
+}
+
+/* Admin preview mode banner */
+.preview-mode-banner {
+    background: linear-gradient(90deg, rgba(123, 44, 191, 0.12), rgba(0, 168, 204, 0.1));
+    border: 1px solid rgba(123, 44, 191, 0.35);
+    color: var(--text-primary);
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+    line-height: 1.45;
+}
+
+.preview-mode-banner strong {
+    color: var(--brand-navy);
+}
+
+.admin-preview-section {
+    border-left: 4px solid #7b2cbf;
+}
+
+/* Game-show hosts: lifelines, modals, cameos */
+.guess-form-lifeline-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+    margin-top: 10px;
+}
+
+.guess-form-lifeline-row .guess-options {
+    flex: 1;
+    min-width: 0;
+}
+
+.album-lifeline-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding-top: 2px;
+}
+
+.btn-lifeline-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    border: 2px solid var(--border-light);
+    border-radius: 10px;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.btn-lifeline-icon:hover:not(:disabled) {
+    border-color: var(--brand-navy);
+    box-shadow: 0 2px 8px rgba(38, 84, 118, 0.15);
+}
+
+.btn-lifeline-icon:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
+.btn-lifeline-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-lifeline-icon img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    display: block;
+}
+
+.lifeline-on-album-hint {
+    font-size: 0.7rem;
+    color: #666;
+    text-align: center;
+    max-width: 72px;
+    line-height: 1.25;
+}
+
+@media (max-width: 520px) {
+    .guess-form-lifeline-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .album-lifeline-stack {
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        padding-top: 0;
+    }
+
+    .lifeline-on-album-hint {
+        max-width: none;
+        width: 100%;
+    }
+}
+
+.guess-option-label.lifeline-fifty-excluded {
+    opacity: 0.35;
+    text-decoration: line-through;
+    pointer-events: none;
+}
+
+.gameshow-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1200;
+    padding: 20px;
+}
+
+.gameshow-modal-card {
+    background: white;
+    border-radius: 16px;
+    padding: 28px 24px;
+    max-width: 520px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.gameshow-modal-card .gameshow-host-img {
+    width: 140px;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 3px solid var(--brand-yellow);
+    display: block;
+    margin: 0 auto 14px;
+}
+
+.gameshow-modal-title {
+    color: var(--brand-navy);
+    font-size: 1.25rem;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.gameshow-modal-body {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+    margin-bottom: 18px;
+}
+
+.gameshow-modal-body p {
+    margin: 0 0 10px;
+}
+
+.gameshow-modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+}
+
+.btn-muted {
+    opacity: 0.85;
+    background: #e8e8e8;
+    color: #333;
+}
+
+.audience-bars {
+    margin-top: 12px;
+}
+
+.audience-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+}
+
+.audience-bar-label {
+    flex: 0 0 38%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.audience-bar-track {
+    flex: 1;
+    height: 10px;
+    background: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.audience-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--brand-blue), var(--brand-navy));
+    border-radius: 5px;
+    min-width: 4px;
+}
+
+.audience-bar-pct {
+    flex: 0 0 48px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.phone-call-modal .phone-call-log {
+    max-height: 220px;
+    overflow-y: auto;
+    text-align: left;
+    background: #f5f5f5;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.phone-call-line {
+    margin-bottom: 10px;
+    line-height: 1.4;
+}
+
+.phone-call-line-five {
+    font-weight: 600;
+    color: #c67600;
+}
+
+.phone-call-line-timeout {
+    font-style: italic;
+    color: var(--brand-dark-red);
+}
+
+.phone-call-timer {
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--brand-navy);
+    margin-bottom: 8px;
+}
+
+.leaderboard-score-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    text-align: right;
+}
+
+.deal-result-line {
+    font-size: 0.95rem;
+    color: #444;
+}
+
+.results-cameo {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+}
+
+.results-cameo--bullseye {
+    background: linear-gradient(135deg, rgba(198, 40, 40, 0.12), rgba(25, 25, 25, 0.08));
+    border: 1px solid rgba(198, 40, 40, 0.3);
+}
+
+.results-cameo--blobby {
+    background: linear-gradient(135deg, rgba(233, 30, 99, 0.12), rgba(156, 39, 176, 0.1));
+    border: 1px solid rgba(233, 30, 99, 0.25);
+}
+
+.results-cameo-img {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 12px;
+    flex-shrink: 0;
+}
+
+.results-cameo-text {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.4;
 }

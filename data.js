@@ -2,6 +2,157 @@
 // Falls back to localStorage if Gist is not configured
 
 const Storage = {
+    PREVIEW_MODE_KEY: 'adminPreviewMode',
+    PREVIEW_OVERLAY_KEY: 'adminPreviewDataOverlay',
+
+    isPreviewMode() {
+        return localStorage.getItem(this.PREVIEW_MODE_KEY) === 'true' &&
+            sessionStorage.getItem('adminLoggedIn') === 'true';
+    },
+
+    setPreviewMode(enabled) {
+        if (enabled) {
+            localStorage.setItem(this.PREVIEW_MODE_KEY, 'true');
+        } else {
+            localStorage.removeItem(this.PREVIEW_MODE_KEY);
+            localStorage.removeItem(this.PREVIEW_OVERLAY_KEY);
+        }
+    },
+
+    getPreviewOverlay() {
+        const raw = localStorage.getItem(this.PREVIEW_OVERLAY_KEY);
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch {
+            localStorage.removeItem(this.PREVIEW_OVERLAY_KEY);
+            return null;
+        }
+    },
+
+    setPreviewOverlay(overlay) {
+        if (!overlay) {
+            localStorage.removeItem(this.PREVIEW_OVERLAY_KEY);
+            return;
+        }
+        localStorage.setItem(this.PREVIEW_OVERLAY_KEY, JSON.stringify(overlay));
+    },
+
+    /** Merge preview overlay (current week only) into a full data object */
+    mergePreviewOverlay(base) {
+        if (!this.isPreviewMode()) return base;
+        const po = this.getPreviewOverlay();
+        if (!po || !po.week) return base;
+        const out = JSON.parse(JSON.stringify(base));
+        const w = po.week;
+        if (po.submissions !== undefined) out.submissions = { ...out.submissions, [w]: po.submissions };
+        if (po.guesses !== undefined) out.guesses = { ...out.guesses, [w]: po.guesses };
+        if (po.finalizedGuesses !== undefined) out.finalizedGuesses = { ...out.finalizedGuesses, [w]: po.finalizedGuesses };
+        if (po.lifelines !== undefined) {
+            if (!out.lifelines) out.lifelines = {};
+            out.lifelines[w] = po.lifelines;
+        }
+        if (po.deals !== undefined) {
+            if (!out.deals) out.deals = {};
+            out.deals[w] = po.deals;
+        }
+        return out;
+    },
+
+    /**
+     * Persist preview changes: only the current week's slice + sync gist cache for local reads.
+     */
+    savePreviewOverlayFromMergedData(data) {
+        const week = this.getCurrentWeek();
+        const overlay = {
+            week,
+            submissions: data.submissions?.[week],
+            guesses: data.guesses?.[week],
+            finalizedGuesses: data.finalizedGuesses?.[week],
+            lifelines: data.lifelines?.[week],
+            deals: data.deals?.[week]
+        };
+        this.setPreviewOverlay(overlay);
+        const cached = this.parseCachedGistData();
+        if (cached) {
+            const merged = this.mergePreviewOverlay(cached);
+            localStorage.setItem('gistDataCache', JSON.stringify(merged));
+            localStorage.setItem('gistDataCacheTime', Date.now().toString());
+        }
+        return { success: true };
+    },
+
+    async seedPreviewWeekMockSubmissions() {
+        const week = this.getCurrentWeek();
+        const members = (await this.getTeamMembers()).filter(Boolean);
+        if (members.length < 2) {
+            return { success: false, message: 'Add at least two team members before seeding preview data.' };
+        }
+        /** Real Spotify album pages so Catchphrase oEmbed artwork works in preview */
+        const previewSpotifyAlbumUrls = [
+            'https://open.spotify.com/album/4LH4d3eNESJKdas12IVkcA',
+            'https://open.spotify.com/album/2wid97MelJBod49liTZsGQ',
+            'https://open.spotify.com/album/1N2lB8qE6HryYzeRbpLS9R',
+            'https://open.spotify.com/album/3mH6qwIyYcrYjIsMyuVpFf'
+        ];
+        const albums = [
+            { artist: 'Preview Artist A', album: 'First Album', url: previewSpotifyAlbumUrls[0] },
+            { artist: 'Preview Artist B', album: 'Second Album', url: previewSpotifyAlbumUrls[1] },
+            { artist: 'Preview Artist C', album: 'Third Album', url: previewSpotifyAlbumUrls[2] },
+            { artist: 'Preview Artist D', album: 'Fourth Album', url: previewSpotifyAlbumUrls[3] }
+        ];
+        const submissions = [];
+        let t = Date.now();
+        members.forEach((submitter, i) => {
+            const a = albums[i % albums.length];
+            submissions.push({
+                id: t++,
+                artist: a.artist,
+                album: `${a.album} (${submitter})`,
+                url: a.url,
+                submitter,
+                week
+            });
+        });
+        this.setPreviewOverlay({
+            week,
+            submissions,
+            guesses: [],
+            finalizedGuesses: [],
+            lifelines: {},
+            deals: {}
+        });
+        const cached = this.parseCachedGistData();
+        if (cached) {
+            const merged = this.mergePreviewOverlay(cached);
+            localStorage.setItem('gistDataCache', JSON.stringify(merged));
+            localStorage.setItem('gistDataCacheTime', Date.now().toString());
+        }
+        return { success: true, message: `Seeded ${submissions.length} mock submission(s) for ${week}.` };
+    },
+
+    /** Clear lifeline usage for the current week in preview overlay only (gist unchanged for that slice). */
+    resetPreviewLifelines() {
+        if (!this.isPreviewMode()) {
+            return { success: false, message: 'Turn on preview mode first.' };
+        }
+        const week = this.getCurrentWeek();
+        const existing = this.getPreviewOverlay() || {};
+        const overlay = {
+            ...existing,
+            week,
+            lifelines: {}
+        };
+        this.setPreviewOverlay(overlay);
+        const cached = this.parseCachedGistData();
+        if (cached) {
+            const merged = this.mergePreviewOverlay(cached);
+            localStorage.setItem('gistDataCache', JSON.stringify(merged));
+            localStorage.setItem('gistDataCacheTime', Date.now().toString());
+        }
+        return { success: true, message: 'Preview lifeline usage reset for this week.' };
+    },
+
     // Gist configuration
     // Checks shared config first, then falls back to localStorage
     getGistId() {
@@ -129,6 +280,12 @@ const Storage = {
         return this.getCurrentWeek();
     },
 
+    /** 4pm on the Friday identified by weekStr (DD/MM/YYYY). */
+    getWeekFriday4pm(weekStr) {
+        const [d, m, y] = weekStr.split('/').map(Number);
+        return new Date(y, m - 1, d, 16, 0, 0, 0);
+    },
+
     // Initialize data structure
     getDefaultData() {
         return {
@@ -136,6 +293,8 @@ const Storage = {
             submissions: {}, // { week: [submissions] }
             guesses: {}, // { week: [guesses] }
             finalizedGuesses: {}, // { week: [guesser names] }
+            lifelines: {}, // { week: { guesser: [{ albumKey, type }] } } type: fiftyFifty | audience | phone
+            deals: {}, // { week: { guesser: { offer, accepted } } }
             themes: {}, // { week: { id, params, text } }
             gameDayOverrides: {}, // { week: DD/MM/YYYY } admin-enabled early game day
             adminPassword: 'admin',
@@ -158,45 +317,57 @@ const Storage = {
     },
 
     async getData() {
+        let base;
         if (this.isGistConfigured()) {
             try {
-                const data = await this.fetchGist();
-                // Cache in localStorage
-                localStorage.setItem('gistDataCache', JSON.stringify(data));
+                base = await this.fetchGist();
+                localStorage.setItem('gistDataCache', JSON.stringify(base));
                 localStorage.setItem('gistDataCacheTime', Date.now().toString());
-                return data;
             } catch (error) {
                 console.error('Error fetching from Gist:', error);
                 const cached = this.parseCachedGistData();
-                if (cached) {
-                    return cached;
-                }
-                // Fallback to localStorage
-                return this.getDataFromLocalStorage();
+                base = cached || this.getDataFromLocalStorage();
             }
         } else {
-            return this.getDataFromLocalStorage();
+            base = this.getDataFromLocalStorage();
         }
+        return this.mergePreviewOverlay(base);
     },
 
     // Always fetch latest data before a write (avoids stale overwrites)
     async getFreshData() {
+        let base;
         if (this.isGistConfigured()) {
             try {
-                const data = await this.fetchGist();
-                localStorage.setItem('gistDataCache', JSON.stringify(data));
+                base = await this.fetchGist();
+                localStorage.setItem('gistDataCache', JSON.stringify(base));
                 localStorage.setItem('gistDataCacheTime', Date.now().toString());
-                return data;
             } catch (error) {
                 console.error('Error fetching fresh Gist data:', error);
                 const cached = this.parseCachedGistData();
-                if (cached) {
-                    return cached;
-                }
-                return this.getDataFromLocalStorage();
+                base = cached || this.getDataFromLocalStorage();
             }
+        } else {
+            base = this.getDataFromLocalStorage();
         }
-        return this.getDataFromLocalStorage();
+        return this.mergePreviewOverlay(base);
+    },
+
+    /** Restore real persisted data for the current week when saving (preview mode). */
+    applyRealWeekSlice(target, source) {
+        const week = this.getCurrentWeek();
+        const t = { ...target };
+        t.submissions = { ...(t.submissions || {}) };
+        t.guesses = { ...(t.guesses || {}) };
+        t.finalizedGuesses = { ...(t.finalizedGuesses || {}) };
+        t.lifelines = { ...(t.lifelines || {}) };
+        t.deals = { ...(t.deals || {}) };
+        t.submissions[week] = source.submissions?.[week] ? [...source.submissions[week]] : [];
+        t.guesses[week] = source.guesses?.[week] ? [...source.guesses[week]] : [];
+        t.finalizedGuesses[week] = source.finalizedGuesses?.[week] ? [...source.finalizedGuesses[week]] : [];
+        t.lifelines[week] = source.lifelines?.[week] ? { ...source.lifelines[week] } : {};
+        t.deals[week] = source.deals?.[week] ? { ...source.deals[week] } : {};
+        return t;
     },
 
     // Get data from localStorage
@@ -242,6 +413,16 @@ const Storage = {
             data.themes = JSON.parse(themes);
         }
 
+        const lifelines = localStorage.getItem('lifelines');
+        if (lifelines) {
+            data.lifelines = JSON.parse(lifelines);
+        }
+
+        const deals = localStorage.getItem('deals');
+        if (deals) {
+            data.deals = JSON.parse(deals);
+        }
+
         // Game day overrides
         const gameDayOverrides = localStorage.getItem('gameDayOverrides');
         if (gameDayOverrides) {
@@ -260,6 +441,36 @@ const Storage = {
     // Save data to Gist or localStorage
     async saveData(data) {
         data.lastUpdated = new Date().toISOString();
+
+        if (this.isPreviewMode()) {
+            let sourceReal;
+            if (this.isGistConfigured()) {
+                try {
+                    sourceReal = await this.fetchGist();
+                } catch (e) {
+                    sourceReal = this.parseCachedGistData() || this.getDefaultData();
+                }
+            } else {
+                sourceReal = this.getDataFromLocalStorage();
+            }
+            const persisted = this.applyRealWeekSlice(data, sourceReal);
+            this.savePreviewOverlayFromMergedData(data);
+            if (this.isGistConfigured()) {
+                try {
+                    await this.updateGist(persisted);
+                    const forCache = this.mergePreviewOverlay(persisted);
+                    localStorage.setItem('gistDataCache', JSON.stringify(forCache));
+                    localStorage.setItem('gistDataCacheTime', Date.now().toString());
+                    return { success: true };
+                } catch (error) {
+                    console.error('Error saving to Gist (preview):', error);
+                    this.saveDataToLocalStorage(persisted);
+                    return { success: false, error: error.message };
+                }
+            }
+            this.saveDataToLocalStorage(persisted);
+            return { success: true };
+        }
         
         if (this.isGistConfigured()) {
             try {
@@ -303,6 +514,14 @@ const Storage = {
         // Themes
         if (data.themes) {
             localStorage.setItem('themes', JSON.stringify(data.themes));
+        }
+
+        if (data.lifelines) {
+            localStorage.setItem('lifelines', JSON.stringify(data.lifelines));
+        }
+
+        if (data.deals) {
+            localStorage.setItem('deals', JSON.stringify(data.deals));
         }
 
         // Game day overrides
@@ -461,7 +680,7 @@ const Storage = {
     async addSubmission(artist, album, url, submitter) {
         const week = this.getCurrentWeek();
 
-        if (!(await this.isGameDay(week))) {
+        if (!this.isPreviewMode() && !(await this.isGameDay(week))) {
             return { success: false, message: 'Albums can only be submitted on Friday (or an admin-enabled game day).' };
         }
 
@@ -652,6 +871,9 @@ const Storage = {
 
     // Clear this week's submissions
     async clearWeekSubmissions(week = null) {
+        if (this.isPreviewMode()) {
+            throw new Error('Preview mode is on — turn it off in Admin before clearing real week data.');
+        }
         const weekKey = week || this.getCurrentWeek();
         const data = await this.getFreshData();
         
@@ -666,6 +888,9 @@ const Storage = {
 
     // Clear this week's guesses
     async clearWeekGuesses(week = null) {
+        if (this.isPreviewMode()) {
+            throw new Error('Preview mode is on — turn it off in Admin before clearing real week data.');
+        }
         const weekKey = week || this.getCurrentWeek();
         const data = await this.getFreshData();
         
@@ -679,13 +904,53 @@ const Storage = {
             data.finalizedGuesses = {};
         }
         data.finalizedGuesses[weekKey] = [];
+
+        if (data.lifelines && data.lifelines[weekKey]) {
+            delete data.lifelines[weekKey];
+        }
+        if (data.deals && data.deals[weekKey]) {
+            delete data.deals[weekKey];
+        }
         
         await this.saveData(data);
         return { success: true };
     },
 
+    /** @returns {Record<string, { albumKey: string, type: string }[]>} */
+    async getLifelinesForWeek(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getData();
+        return data.lifelines?.[weekKey] || {};
+    },
+
+    async saveGuesserLifelines(weekKey, guesser, entries) {
+        const data = await this.getFreshData();
+        if (!data.lifelines) data.lifelines = {};
+        if (!data.lifelines[weekKey]) data.lifelines[weekKey] = {};
+        data.lifelines[weekKey][guesser] = Array.isArray(entries) ? entries : [];
+        await this.saveData(data);
+    },
+
+    /** @returns {Record<string, { offer: number, accepted: boolean } | null>} */
+    async getDealsForWeek(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getData();
+        return data.deals?.[weekKey] || {};
+    },
+
+    async saveGuesserDeal(weekKey, guesser, deal) {
+        const data = await this.getFreshData();
+        if (!data.deals) data.deals = {};
+        if (!data.deals[weekKey]) data.deals[weekKey] = {};
+        data.deals[weekKey][guesser] = deal;
+        await this.saveData(data);
+    },
+
     // Clear finalized guesses for a week (unlock guesses)
     async clearFinalizedGuesses(week = null) {
+        if (this.isPreviewMode()) {
+            throw new Error('Preview mode is on — turn it off in Admin before unlocking real finalized guesses.');
+        }
         const weekKey = week || this.getCurrentWeek();
         const data = await this.getFreshData();
         
@@ -759,6 +1024,16 @@ const Storage = {
         const submissions = await this.getSubmissions(weekKey);
         const guesses = await this.getGuesses(weekKey);
         const members = await this.getTeamMembers();
+        const data = await this.getData();
+        const weekLifelines = data.lifelines?.[weekKey] || {};
+        const weekDeals = data.deals?.[weekKey] || {};
+
+        /** @param {string} guesser @param {string} albumKey */
+        const lifelineCountForAlbum = (guesser, albumKey) => {
+            const list = weekLifelines[guesser];
+            if (!Array.isArray(list)) return 0;
+            return list.filter(e => e && e.albumKey === albumKey).length;
+        };
 
         // Group submissions by album key
         const albumGroups = {};
@@ -779,9 +1054,11 @@ const Storage = {
         const scores = {};
         members.forEach(member => {
             scores[member] = {
-                correct: 0,
+                correct: 0, // actual points from guesses + lifeline multipliers
+                publishedCorrect: 0, // deal when accepted, else actual
                 total: 0, // Set later for guessers: number of albums they guessed
-                submissions: submissions.filter(s => s.submitter === member).length
+                submissions: submissions.filter(s => s.submitter === member).length,
+                deal: null // { offer, accepted } or null
             };
         });
 
@@ -818,16 +1095,43 @@ const Storage = {
                 if (albumGroup) {
                     const actualSubmitters = [...new Set(albumGroup.actualSubmitters)];
                     const guessedSubmitters = [...new Set(guessesByGuesserAndAlbum[guesser][albumKey])];
-                    
-                    // Count correct guesses (people guessed who actually submitted)
-                    const correctCount = guessedSubmitters.filter(g => actualSubmitters.includes(g)).length;
-                    
-                    // Add points for correct guesses
-                    // Each correct guess is worth 1 point
-                    scores[guesser].correct += correctCount;
+                    const nLifelines = lifelineCountForAlbum(guesser, albumKey);
+                    const mult = 1 / Math.pow(2, nLifelines);
+
+                    const correctPoints = guessedSubmitters
+                        .filter(g => actualSubmitters.includes(g))
+                        .length * mult;
+
+                    scores[guesser].correct += correctPoints;
                 }
             });
         });
+
+        Object.keys(scores).forEach(member => {
+            const d = weekDeals[member];
+            if (d && typeof d.offer === 'number') {
+                scores[member].deal = { offer: d.offer, accepted: !!d.accepted };
+                scores[member].publishedCorrect = d.accepted ? d.offer : scores[member].correct;
+            } else {
+                scores[member].publishedCorrect = scores[member].correct;
+            }
+        });
+
+        // After 4pm Friday: submitters who never finalized get 0 points (counted as missed every album)
+        const albumCount = Object.keys(albumGroups).length;
+        const finalizedList = data.finalizedGuesses?.[weekKey] || [];
+        const deadlinePassed = albumCount > 0 && new Date() >= this.getWeekFriday4pm(weekKey);
+        if (deadlinePassed && !this.isPreviewMode()) {
+            const submitterSet = new Set(submissions.map(s => s.submitter));
+            members.forEach(member => {
+                if (!submitterSet.has(member)) return;
+                if (finalizedList.includes(member)) return;
+                scores[member].correct = 0;
+                scores[member].publishedCorrect = 0;
+                scores[member].total = albumCount;
+                scores[member].deal = null;
+            });
+        }
 
         return {
             submissions,
@@ -907,7 +1211,10 @@ const Storage = {
             members.forEach(member => {
                 // Only add guess stats and weeksPlayed when they actually made guesses that week
                 if (results.scores[member] && results.scores[member].total > 0) {
-                    stats[member].totalCorrect += results.scores[member].correct;
+                    const pub = results.scores[member].publishedCorrect != null
+                        ? results.scores[member].publishedCorrect
+                        : results.scores[member].correct;
+                    stats[member].totalCorrect += pub;
                     stats[member].totalGuesses += results.scores[member].total;
                     stats[member].weeksPlayed++;
                 }

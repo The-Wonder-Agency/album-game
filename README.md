@@ -1,4 +1,4 @@
-# The All New All-New Album Game (AI Super Deluxe Edition)
+# Who Wants To Be An Album Game Millionaire? (Previously The All New All-New Album Game (AI Super Deluxe Edition))
 
 A web-based album guessing game for teams, hosted on GitHub Pages.
 
@@ -86,4 +86,9 @@ If you prefer individual setup:
 - Submissions are anonymous until results are revealed
 - Each person can submit 1 album per week
 - Guesses are saved automatically as you make them
+- You must **Save & finalize** your guesses before **4pm on the week’s Friday**. After that, anyone who submitted albums but never finalized is scored **0** for the week (as if they missed every album). Partial draft guesses do not count.
 - Duplicate albums (same artist + album) can be submitted by different people - users must guess which person submitted which one
+
+## Admin: preview mode (local testing)
+
+Log in to **Admin** and use **Preview mode** to seed mock albums for the current week and try lifelines, Deal or No Deal, and results **without writing guesses to the shared Gist**. Mock data is merged in your browser only (overlay in `localStorage`). Use **Reset lifelines (preview)** to clear lifeline usage for the current week and try them again. Turn preview off when finished. While preview is on, clearing submissions/guesses for the week from Admin is blocked so you don’t wipe real data by mistake.

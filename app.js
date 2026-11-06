@@ -17,6 +17,99 @@ const HARRY_HILL_IMAGES = [
     'images/harry-hill/JS47551015.avif'
 ];
 
+const GAME_SHOW_TITLE = 'Who Wants To Be An Album Game Millionaire? (Previously The All New All-New Album Game (AI Super Deluxe Edition))';
+
+const CHRIS_IMAGE_5050 = 'images/chris-tarrant/842328698_18380646265239409_2468023915473924986_n.jpg';
+const CHRIS_IMAGE_AUDIENCE = 'images/chris-tarrant/843205650_18380646262239409_1717322556819931312_n.jpg';
+const CHRIS_IMAGE_PHONE = 'images/chris-tarrant/0_CD31326899.avif';
+const LIFELINE_ICON_5050 = 'images/lifelines/50-50_2018.webp';
+const LIFELINE_ICON_AUDIENCE = 'images/lifelines/ATA_2018.webp';
+const LIFELINE_ICON_PHONE = 'images/lifelines/PAF_2018.webp';
+const LIFELINE_CONFIRM_BODY = '<p>This lifeline can only be used once per week.</p><p>If you use it on this album, your score for this guess is halved (multiple lifelines on the same album keep halving).</p>';
+const NOEL_BANKER_IMAGE = 'images/noel-edmunds/1_Noel-Edmonds-Deal-or-No-Deal.avif';
+const JIM_BOWEN_IMAGE = 'images/jim-bowen/4319.jpg';
+const MR_BLOBBY_IMAGE = 'images/mr-blobby/SEI_229300029-e519.webp';
+const RICHARD_OBRIEN_IMAGE = 'images/richard-obrien/MAIN-Richard-OBrien.avif';
+const ROY_WALKER_IMAGE = 'images/roy-walker/catchphrase-tv---roy-walker-440nw-814149as.jpg';
+const LES_DENNIS_IMAGE = 'images/les-dennis/4_Family-Fortunes.avif';
+
+const LETTER_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/** Same hash mixing as seededShuffle */
+function stringToHash32(str) {
+    let seed = 0;
+    for (let i = 0; i < str.length; i++) {
+        seed = ((seed << 5) - seed) + str.charCodeAt(i);
+        seed |= 0;
+    }
+    return seed >>> 0;
+}
+
+function mulberry32(a) {
+    return function () {
+        let t = a += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+}
+
+function randomForSeed(seedKey) {
+    return mulberry32(stringToHash32(seedKey));
+}
+
+function pickFromWeighted(names, weights, rand) {
+    const sum = weights.reduce((a, b) => a + b, 0);
+    let r = rand() * sum;
+    for (let i = 0; i < names.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return names[i];
+    }
+    return names[names.length - 1];
+}
+
+/** Raw weights for Ask the Audience / Phone “how certain” (skewed toward actual submitters). */
+function audienceStyleWeightsForNames(names, actualSubmitters, rand) {
+    return names.map(name => {
+        const isRight = actualSubmitters.includes(name);
+        return isRight ? 20 + rand() * 25 : 3 + rand() * 12;
+    });
+}
+
+function percentagesFromWeights(weights) {
+    const sumW = weights.reduce((a, b) => a + b, 0);
+    if (sumW <= 0) return weights.map(() => 0);
+    return weights.map(w => (w / sumW) * 100);
+}
+
+function shuffleWithRand(array, rand) {
+    const a = [...array];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+function formatScoreNum(n) {
+    if (typeof n !== 'number' || Number.isNaN(n)) return String(n);
+    const rounded = Math.round(n * 1000) / 1000;
+    if (Number.isInteger(rounded)) return String(rounded);
+    return String(rounded);
+}
+
+/** Banker offer: 35–65% of album count, step 0.5, never 0 or full house. */
+function computeBankerOffer(week, guesser, albumCount) {
+    if (albumCount < 1) return 0;
+    const rand = randomForSeed(`${week}|bankerOffer|${guesser}|${albumCount}`);
+    const frac = 0.35 + rand() * 0.3;
+    let offer = Math.round(albumCount * frac * 2) / 2;
+    if (offer < 0.5) offer = 0.5;
+    if (offer >= albumCount) offer = albumCount - 0.5;
+    if (offer < 0.5) offer = 0.5;
+    return offer;
+}
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     try {
@@ -194,13 +287,24 @@ async function checkUrlParameters() {
 }
 
 function isBeforeGuessTime() {
+    if (typeof Storage !== 'undefined' && Storage.isPreviewMode()) return false;
     const now = new Date();
     return now.getHours() < 10 || (now.getHours() === 10 && now.getMinutes() < 30);
 }
 
 function isBeforeMidday() {
+    if (typeof Storage !== 'undefined' && Storage.isPreviewMode()) return false;
     const now = new Date();
     return now.getHours() < 12;
+}
+
+function previewModeBanner() {
+    if (typeof Storage === 'undefined' || !Storage.isPreviewMode()) return '';
+    return `
+        <div class="preview-mode-banner" role="status">
+            <strong>Preview mode</strong> — you’re seeing mock data for this week on this device only. Nothing is saved to the shared Gist until you turn preview off.
+        </div>
+    `;
 }
 /** Midday on the Friday that identifies a game week (weekStr is DD/MM/YYYY). */
 function getWeekFridayMidday(weekStr) {
@@ -221,6 +325,183 @@ function isAfter4pmOnWeekFriday(weekStr) {
     return new Date() >= getWeekFriday4pm(weekStr);
 }
 
+/** True when `date` is the calendar day identified by weekStr (DD/MM/YYYY = that Friday). */
+function isDateSameAsWeekFriday(weekStr, date = new Date()) {
+    const [d, m, y] = weekStr.split('/').map(Number);
+    return date.getDate() === d && date.getMonth() === m - 1 && date.getFullYear() === y;
+}
+
+/** Spotify album id from open.spotify.com/.../album/{id} */
+function extractSpotifyAlbumId(url) {
+    if (!url || typeof url !== 'string') return null;
+    const match = url.trim().match(/album\/([a-zA-Z0-9]+)/);
+    return match ? match[1] : null;
+}
+
+function getFirstSpotifyAlbumUrlFromSubmissions(submissions) {
+    if (!Array.isArray(submissions)) return '';
+    for (const s of submissions) {
+        if (s && s.url && extractSpotifyAlbumId(s.url)) return s.url.trim();
+    }
+    return '';
+}
+
+async function fetchSpotifyOEmbedThumbnail(albumPageUrl) {
+    const u = `https://open.spotify.com/oembed?url=${encodeURIComponent(albumPageUrl)}`;
+    const res = await fetch(u);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.thumbnail_url || null;
+}
+
+function prefersReducedMotion() {
+    return typeof window !== 'undefined' && window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Crystal Maze: one-off Friday deadline reminders on the Guess page (preview mode skipped). */
+async function maybeShowCrystalMazeDeadlinePopup(week) {
+    if (Storage.isPreviewMode()) return;
+    if (!currentGuesser) return;
+    const finalized = await Storage.areGuessesFinalized(currentGuesser, week);
+    if (finalized) return;
+    if (!isDateSameAsWeekFriday(week, new Date())) return;
+
+    const now = new Date();
+    const tMin = now.getHours() * 60 + now.getMinutes();
+    let windowId = null;
+    let bodyHtml = '';
+
+    if (tMin >= 10 * 60 && tMin < 12 * 60) {
+        windowId = 'midday';
+        bodyHtml = '<p>Results unlock at <strong>midday</strong> once everyone has finalized their guesses. Still time to lock in your answers in the maze!</p>';
+    } else if (tMin >= 12 * 60 && tMin < 16 * 60) {
+        const pending = await getPendingGuessers(week);
+        if (pending.length > 0) {
+            windowId = 'fourPmPending';
+            bodyHtml = '<p>Someone is still guessing — results will show at <strong>4pm</strong> if guesses are still outstanding. Save &amp; finalize yours before then!</p>';
+        } else {
+            windowId = 'fourPmGeneric';
+            bodyHtml = '<p>After <strong>midday</strong>, results may be live. If anyone is still guessing, the rest of the team might be waiting until <strong>4pm</strong> — don&apos;t be the straggler: finalize!</p>';
+        }
+    } else if (tMin >= 16 * 60) {
+        windowId = 'after4pm';
+        bodyHtml = '<p>It&apos;s past <strong>4pm</strong> on results Friday. If you haven&apos;t finalized your guesses, you&apos;ll be scored <strong>0</strong> for this week (see the rules).</p>';
+    }
+
+    if (!windowId) return;
+
+    const key = `crystalMazeWarn_${week}_${windowId}`;
+    if (localStorage.getItem(key)) return;
+
+    await openConfirmModal({
+        title: 'The Crystal Maze',
+        image: RICHARD_OBRIEN_IMAGE,
+        bodyHtml,
+        confirmLabel: 'OK',
+        cancelLabel: 'Close'
+    });
+    localStorage.setItem(key, '1');
+}
+
+async function hydrateCatchphraseAlbumArt(root = document) {
+    const cells = root.querySelectorAll('.catchphrase-art-cell[data-spotify-url]');
+    if (cells.length === 0) return;
+    const cache = new Map();
+    for (const cell of cells) {
+        const url = cell.getAttribute('data-spotify-url');
+        if (!url) continue;
+        let thumb = cache.get(url);
+        if (thumb === undefined) {
+            try {
+                thumb = await fetchSpotifyOEmbedThumbnail(url);
+            } catch {
+                thumb = null;
+            }
+            cache.set(url, thumb);
+        }
+        const img = cell.querySelector('.catchphrase-album-thumb');
+        const ph = cell.querySelector('.catchphrase-art-placeholder');
+        const roy = cell.querySelector('.catchphrase-roy-host');
+        if (thumb && img) {
+            img.src = thumb;
+            img.removeAttribute('hidden');
+            img.alt = 'Album artwork';
+            if (ph) ph.hidden = true;
+        } else if (ph) {
+            ph.textContent = 'No artwork (add a Spotify album link when submitting)';
+        }
+        if (roy) roy.hidden = false;
+    }
+}
+
+function revealFortunesItemInstant(item) {
+    item.classList.add('result-item--revealed');
+    const contentEl = item.querySelector('.fortunes-card-content');
+    if (contentEl) contentEl.removeAttribute('inert');
+    const board = item.querySelector('.fortunes-card-board');
+    if (board) board.hidden = true;
+    item.querySelectorAll('.result-reveal-line').forEach(el => { el.hidden = false; });
+    const hasGuesses = item.getAttribute('data-has-guesses') === 'true';
+    const allCorrect = item.getAttribute('data-all-correct') === 'true';
+    item.classList.remove('result-item--pending');
+    if (hasGuesses) {
+        item.classList.add(allCorrect ? 'correct' : 'incorrect');
+    }
+}
+
+async function runFortunesItemSteps(item, stepMs) {
+    const contentEl = item.querySelector('.fortunes-card-content');
+    const board = item.querySelector('.fortunes-card-board');
+    try {
+        item.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+    } catch {
+        item.scrollIntoView(true);
+    }
+    await sleep(prefersReducedMotion() ? 0 : 400);
+    if (board) {
+        board.classList.add('fortunes-card-board--lifting');
+        await sleep(prefersReducedMotion() ? 0 : 420);
+        board.hidden = true;
+    }
+    if (contentEl) contentEl.removeAttribute('inert');
+    item.classList.add('result-item--revealed');
+    const lines = item.querySelectorAll('.result-reveal-line');
+    for (let i = 0; i < lines.length; i++) {
+        lines[i].hidden = false;
+        if (i < lines.length - 1) await sleep(stepMs);
+    }
+    const hasGuesses = item.getAttribute('data-has-guesses') === 'true';
+    const allCorrect = item.getAttribute('data-all-correct') === 'true';
+    item.classList.remove('result-item--pending');
+    if (hasGuesses) {
+        item.classList.add(allCorrect ? 'correct' : 'incorrect');
+    }
+}
+
+function initFortunesResultsReveal(container) {
+    const items = [...container.querySelectorAll('.result-item[data-fortunes-index]')];
+    if (items.length === 0) return;
+
+    if (prefersReducedMotion()) {
+        items.forEach(revealFortunesItemInstant);
+        return;
+    }
+
+    const stepMs = 700;
+    let chain = Promise.resolve();
+    items.forEach((item, idx) => {
+        chain = chain.then(() => runFortunesItemSteps(item, stepMs));
+        if (idx < items.length - 1) {
+            chain = chain.then(() => sleep(350));
+        }
+    });
+}
+
 async function getPendingGuessers(week) {
     const submissions = await Storage.getSubmissions(week);
     const submitters = [...new Set(submissions.map(s => s.submitter))];
@@ -231,6 +512,7 @@ async function getPendingGuessers(week) {
 }
 
 async function isWeekResultsRevealed(weekStr) {
+    if (Storage.isPreviewMode()) return true;
     const submissions = await Storage.getSubmissions(weekStr);
     if (submissions.length === 0) return false;
 
@@ -308,6 +590,173 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+}
+
+function removeGameshowModal() {
+    document.getElementById('gameshow-modal-backdrop')?.remove();
+}
+
+/**
+ * @param {{ title: string, image?: string, bodyHtml: string, confirmLabel?: string, cancelLabel?: string }} opts
+ * @returns {Promise<boolean>}
+ */
+function openConfirmModal(opts) {
+    return new Promise((resolve) => {
+        removeGameshowModal();
+        const backdrop = document.createElement('div');
+        backdrop.className = 'gameshow-modal-backdrop';
+        backdrop.id = 'gameshow-modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="gameshow-modal-card" role="dialog" aria-modal="true">
+                ${opts.image ? `<img src="${opts.image}" alt="" class="gameshow-host-img">` : ''}
+                <h3 class="gameshow-modal-title">${opts.title}</h3>
+                <div class="gameshow-modal-body">${opts.bodyHtml}</div>
+                <div class="gameshow-modal-actions">
+                    <button type="button" class="btn btn-success" id="gameshow-modal-confirm">${escapeHtml(opts.confirmLabel || 'Confirm')}</button>
+                    <button type="button" class="btn" id="gameshow-modal-cancel">${escapeHtml(opts.cancelLabel || 'Cancel')}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        backdrop.querySelector('#gameshow-modal-confirm').addEventListener('click', () => {
+            removeGameshowModal();
+            resolve(true);
+        });
+        backdrop.querySelector('#gameshow-modal-cancel').addEventListener('click', () => {
+            removeGameshowModal();
+            resolve(false);
+        });
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+                removeGameshowModal();
+                resolve(false);
+            }
+        });
+    });
+}
+
+/**
+ * @param {number} offer
+ * @returns {Promise<boolean|null>} true = deal, false = no deal, null = cancel
+ */
+function openBankerOfferModal(offer) {
+    return new Promise((resolve) => {
+        removeGameshowModal();
+        const backdrop = document.createElement('div');
+        backdrop.className = 'gameshow-modal-backdrop';
+        backdrop.id = 'gameshow-modal-backdrop';
+        backdrop.innerHTML = `
+            <div class="gameshow-modal-card banker-modal" role="dialog" aria-modal="true">
+                <img src="${NOEL_BANKER_IMAGE}" alt="Noel Edmonds" class="gameshow-host-img">
+                <h3 class="gameshow-modal-title">The Banker is phoning…</h3>
+                <p class="gameshow-modal-body">Noel says the Banker will lock in <strong>${formatScoreNum(offer)}</strong> points for this week. Do you accept?</p>
+                <div class="gameshow-modal-actions">
+                    <button type="button" class="btn btn-success" id="banker-deal-btn">Deal</button>
+                    <button type="button" class="btn" id="banker-no-deal-btn">No deal</button>
+                    <button type="button" class="btn btn-muted" id="banker-cancel-btn">Cancel</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(backdrop);
+        backdrop.querySelector('#banker-deal-btn').addEventListener('click', () => {
+            removeGameshowModal();
+            resolve(true);
+        });
+        backdrop.querySelector('#banker-no-deal-btn').addEventListener('click', () => {
+            removeGameshowModal();
+            resolve(false);
+        });
+        backdrop.querySelector('#banker-cancel-btn').addEventListener('click', () => {
+            removeGameshowModal();
+            resolve(null);
+        });
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+                removeGameshowModal();
+                resolve(null);
+            }
+        });
+    });
+}
+
+function parseAlbumMeta(group) {
+    try {
+        const raw = group.getAttribute('data-album-meta');
+        return raw ? JSON.parse(raw) : { title: '', artist: '', actualSubmitters: [] };
+    } catch {
+        return { title: '', artist: '', actualSubmitters: [] };
+    }
+}
+
+function getNamesFromGuessGroup(group) {
+    return [...group.querySelectorAll('.guess-option-label')].map(l => l.getAttribute('data-person'));
+}
+
+/** Names still in play after 50:50 (greyed labels excluded). */
+function getActiveNamesFromGuessGroup(group) {
+    return [...group.querySelectorAll('.guess-option-label:not(.lifeline-fifty-excluded)')].map(l => l.getAttribute('data-person'));
+}
+
+function applyFiftyFiftyKeepSet(group, keepSet) {
+    group.querySelectorAll('.guess-option-label').forEach(label => {
+        const p = label.getAttribute('data-person');
+        const input = label.querySelector('input');
+        if (!keepSet.has(p)) {
+            label.classList.add('lifeline-fifty-excluded');
+            if (input) {
+                input.checked = false;
+                input.disabled = true;
+            }
+        } else {
+            label.classList.remove('lifeline-fifty-excluded');
+        }
+    });
+}
+
+function formatAudienceVoteSuffix(numOptions) {
+    if (numOptions <= 0) return '';
+    const letters = [...LETTER_LABELS.slice(0, numOptions)];
+    if (numOptions === 1) return `${letters[0]}, all vote... now!`;
+    if (numOptions === 2) return `${letters[0]} or ${letters[1]}, all vote... now!`;
+    return `${letters.slice(0, -1).join(', ')} or ${letters[numOptions - 1]}, all vote... now!`;
+}
+
+function formatAudienceKeypadLine(names) {
+    const n = names.length;
+    if (n === 0) return '';
+    let keypad = `Now A on your keypads is ${names[0]}`;
+    for (let i = 1; i < n; i++) {
+        const L = LETTER_LABELS[i];
+        if (i === n - 1) {
+            keypad += n === 2 ? ` and ${L} is ${names[i]}` : `, and ${L} is ${names[i]}`;
+        } else {
+            keypad += `, ${L} is ${names[i]}`;
+        }
+    }
+    return `${keypad}. ${formatAudienceVoteSuffix(n)}`;
+}
+
+function buildAudienceBarsHtml(names, weights) {
+    const rows = names.map((name, i) => {
+        const pct = Math.min(100, Math.max(0, weights[i]));
+        return `
+        <div class="audience-bar-row">
+            <span class="audience-bar-label">${LETTER_LABELS[i]}. ${escapeHtml(name)}</span>
+            <div class="audience-bar-track">
+                <div class="audience-bar-fill" style="width:${pct}%"></div>
+            </div>
+            <span class="audience-bar-pct">${pct.toFixed(1)}%</span>
+        </div>
+    `;
+    }).join('');
+    return `<div class="audience-bars">${rows}</div>`;
 }
 
 function renderThemeBanner() {
@@ -595,6 +1044,7 @@ async function renderSubmitPage() {
 
     return `
         <div class="page active">
+            ${previewModeBanner()}
             <h2 class="page-title">Submit Albums</h2>
             ${isGameDay ? renderThemeBanner() : ''}
             ${!isGameDay ? `
@@ -839,8 +1289,20 @@ async function renderGuessPage() {
         }
     });
 
+    const lifelinesByWeek = await Storage.getLifelinesForWeek(week);
+    const myLifelineEntries = (lifelinesByWeek[currentGuesser] || []).filter(e => e && e.albumKey && e.type);
+    const usedFiftyGlobally = myLifelineEntries.some(e => e.type === 'fiftyFifty');
+    const usedAudienceGlobally = myLifelineEntries.some(e => e.type === 'audience');
+    const usedPhoneGlobally = myLifelineEntries.some(e => e.type === 'phone');
+    const lifelinesByAlbum = {};
+    myLifelineEntries.forEach(e => {
+        if (!lifelinesByAlbum[e.albumKey]) lifelinesByAlbum[e.albumKey] = [];
+        lifelinesByAlbum[e.albumKey].push(e.type);
+    });
+
     return `
         <div class="page active" data-guesses-finalized="${guessesFinalized}">
+            ${previewModeBanner()}
             <h2 class="page-title">Guess Who Submitted What</h2>
             ${guessesFinalized ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
@@ -860,34 +1322,86 @@ async function renderGuessPage() {
             ${uniqueAlbums.map(albumGroup => {
                 const existingGuesses = existingGuessesByAlbum[albumGroup.key] || [];
                 const useRadioButtons = !hasDuplicates;
+                const onThisAlbum = lifelinesByAlbum[albumGroup.key] || [];
+                const albumActualSubmitters = [...new Set(albumGroup.submissions.map(s => s.submitter))];
+                const wrongNamePool = submittersThisWeek.filter(m => !albumActualSubmitters.includes(m));
+                const fiftyDisabled = guessesFinalized || usedFiftyGlobally || submittersThisWeek.length <= 2 || wrongNamePool.length === 0;
+                const audienceDisabled = guessesFinalized || usedAudienceGlobally;
+                const phoneDisabled = guessesFinalized || usedPhoneGlobally;
+                const albumTitleEsc = escapeHtml(albumGroup.album);
+                const albumArtistEsc = escapeHtml(albumGroup.artist);
+                const albumMetaAttr = escapeAttr(JSON.stringify({
+                    title: albumGroup.album,
+                    artist: albumGroup.artist,
+                    actualSubmitters: albumActualSubmitters
+                }));
+                const lifelineHint = onThisAlbum.map(t => (
+                    t === 'fiftyFifty' ? '50:50' : t === 'audience' ? 'Ask the Audience' : t === 'phone' ? 'Phone a Friend' : t
+                )).join(', ');
+                const spotifyUrl = albumGroup.submissions.map(s => s.url).find(u => u && extractSpotifyAlbumId(u)) || '';
+                const spotifyUrlAttr = spotifyUrl ? escapeAttr(spotifyUrl) : '';
                 return `
-                    <div class="album-card">
-                        <h3>${albumGroup.album}</h3>
-                        <p><strong>Artist:</strong> ${albumGroup.artist}</p>
+                    <div class="album-card" data-album-key="${albumGroup.key}">
+                        ${spotifyUrl ? `
+                        <div class="catchphrase-art-cell" data-spotify-url="${spotifyUrlAttr}">
+                            <div class="catchphrase-panel">
+                                <div class="catchphrase-art-wrap">
+                                    <span class="catchphrase-art-placeholder" aria-hidden="true">…</span>
+                                    <img class="catchphrase-album-thumb" alt="" width="120" height="120" hidden>
+                                </div>
+                                <div class="catchphrase-copy">
+                                    <span class="catchphrase-say-what">Say what you see…</span>
+                                    <p class="catchphrase-title-line"><strong>${albumTitleEsc}</strong></p>
+                                    <p class="catchphrase-artist-line">${albumArtistEsc}</p>
+                                </div>
+                            </div>
+                            <img src="${ROY_WALKER_IMAGE}" alt="Roy Walker" class="catchphrase-roy-host" width="72" height="72">
+                        </div>
+                        ` : ''}
+                        ${spotifyUrl ? '' : `<h3>${albumTitleEsc}</h3>
+                        <p><strong>Artist:</strong> ${albumArtistEsc}</p>`}
                         <div class="guess-form">
-                            <label>Who submitted this? ${useRadioButtons ? '(Select one)' : `(Select up to ${maxDuplicateCount}, only one album can have multiple)`}</label>
-                            <div class="guess-options" 
-                                 data-album-key="${albumGroup.key}" 
-                                 data-use-radio="${useRadioButtons}" 
-                                 data-max-selections="${maxDuplicateCount}"
-                                 style="margin-top: 10px;">
-                                ${submittersThisWeek.map(m => {
+                            <div class="guess-form-lifeline-row">
+                                <div class="guess-options" 
+                                     data-album-key="${albumGroup.key}" 
+                                     data-album-meta="${albumMetaAttr}"
+                                     data-use-radio="${useRadioButtons}" 
+                                     data-max-selections="${maxDuplicateCount}"
+                                     role="group"
+                                     aria-label="${useRadioButtons ? 'Pick who submitted this album (choose one)' : escapeAttr(`Pick who submitted this album (up to ${maxDuplicateCount})`)}">
+                                    ${submittersThisWeek.map(m => {
                                     const isSelected = existingGuesses.includes(m);
                                     const inputType = useRadioButtons ? 'radio' : 'checkbox';
                                     const inputName = useRadioButtons ? `guess-${albumGroup.key}` : '';
+                                    const mAttr = escapeAttr(m);
                                     return `
-                                        <label style="display: flex; align-items: center; margin-bottom: 10px; ${guessesFinalized ? 'opacity: 0.6;' : 'cursor: pointer;'}">
+                                        <label class="guess-option-label" data-person="${mAttr}" style="display: flex; align-items: center; margin-bottom: 10px; ${guessesFinalized ? 'opacity: 0.6;' : 'cursor: pointer;'}">
                                             <input type="${inputType}" 
                                                    name="${inputName}"
-                                                   value="${m}" 
+                                                   value="${mAttr}" 
                                                    ${isSelected ? 'checked' : ''}
                                                    ${guessesFinalized ? 'disabled' : ''}
                                                    class="guess-input"
                                                    style="margin-right: 8px; width: 18px; height: 18px; ${guessesFinalized ? '' : 'cursor: pointer;'}">
-                                            <span>${m}</span>
+                                            <span>${escapeHtml(m)}</span>
                                         </label>
                                     `;
                                 }).join('')}
+                                </div>
+                                ${!guessesFinalized ? `
+                                <div class="album-lifeline-stack" data-album-key="${albumGroup.key}">
+                                    <button type="button" class="btn-lifeline-icon" data-lifeline-action="fiftyFifty" data-album-key="${albumGroup.key}" title="50:50" aria-label="50:50" ${fiftyDisabled ? 'disabled' : ''}>
+                                        <img src="${LIFELINE_ICON_5050}" alt="">
+                                    </button>
+                                    <button type="button" class="btn-lifeline-icon" data-lifeline-action="audience" data-album-key="${albumGroup.key}" title="Ask the Audience" aria-label="Ask the Audience" ${audienceDisabled ? 'disabled' : ''}>
+                                        <img src="${LIFELINE_ICON_AUDIENCE}" alt="">
+                                    </button>
+                                    <button type="button" class="btn-lifeline-icon" data-lifeline-action="phone" data-album-key="${albumGroup.key}" title="Phone a Friend" aria-label="Phone a Friend" ${phoneDisabled ? 'disabled' : ''}>
+                                        <img src="${LIFELINE_ICON_PHONE}" alt="">
+                                    </button>
+                                    <span class="lifeline-on-album-hint" ${onThisAlbum.length ? '' : 'style="display:none"'}>Used on this album: ${escapeHtml(lifelineHint)}</span>
+                                </div>
+                                ` : ''}
                             </div>
                         </div>
                     </div>
@@ -904,6 +1418,7 @@ async function renderGuessPage() {
 
 function setupGuessPage() {
     const guessGroups = document.querySelectorAll('.guess-options');
+    const guessesFinalized = document.querySelector('.page.active')?.getAttribute('data-guesses-finalized') === 'true';
 
     const guesserNameInput = document.getElementById('guesser-name-guess');
     if (guesserNameInput) {
@@ -1001,49 +1516,302 @@ function setupGuessPage() {
                 return;
             }
 
-            if (confirm('Are you sure you want to save and finalize your guesses? You will not be able to change them after this.')) {
-                saveBtn.disabled = true;
-                saveBtn.textContent = 'Saving...';
+            const preConfirm = await openConfirmModal({
+                title: 'Finalize guesses?',
+                bodyHtml: '<p>Are you sure you want to save and finalize your guesses? You will not be able to change them after this.</p>',
+                confirmLabel: 'Continue',
+                cancelLabel: 'Cancel'
+            });
+            if (!preConfirm) return;
 
-                try {
-                    const week = Storage.getCurrentWeek();
-                    // Fetch latest data right before modifying to avoid overwriting another user's guesses
-                    const data = await Storage.getFreshData();
-                    if (!data.guesses) data.guesses = {};
-                    if (!data.guesses[week]) data.guesses[week] = [];
-                    // Remove only this guesser's guesses for this week (keep everyone else's)
-                    data.guesses[week] = data.guesses[week].filter(g => g.guesser !== currentGuesser || !g.albumKey);
-                    // Add this user's new guesses
-                    for (const g of guessesToSave) {
-                        data.guesses[week].push({
-                            albumKey: g.albumKey,
-                            guesser: currentGuesser,
-                            guessedSubmitter: g.guessedSubmitter,
-                            week
-                        });
-                    }
-                    // Finalize in the same save
-                    if (!data.finalizedGuesses) data.finalizedGuesses = {};
-                    if (!data.finalizedGuesses[week]) data.finalizedGuesses[week] = [];
-                    if (!data.finalizedGuesses[week].includes(currentGuesser)) {
-                        data.finalizedGuesses[week].push(currentGuesser);
-                    }
-                    const saveResult = await Storage.saveData(data);
-                    if (!saveResult || !saveResult.success) {
-                        throw new Error('Failed to save guesses');
-                    }
+            const week = Storage.getCurrentWeek();
+            const albumCount = guessGroups.length;
+            const offer = computeBankerOffer(week, currentGuesser, albumCount);
+            const bankerChoice = await openBankerOfferModal(offer);
+            if (bankerChoice === null) return;
 
-                    await updateNavigationVisibility();
-                    await renderPage('guess');
-                    showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at midday on Friday once everyone has guessed, or at 4pm if anyone is still outstanding.', 'success');
-                } catch (error) {
-                    console.error('Error saving guesses:', error);
-                    showMessage('guess-message', 'Error saving guesses: ' + error.message, 'error');
-                    saveBtn.disabled = false;
-                    saveBtn.textContent = 'Save & Finalize Guesses';
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+
+            try {
+                const data = await Storage.getFreshData();
+                if (!data.guesses) data.guesses = {};
+                if (!data.guesses[week]) data.guesses[week] = [];
+                data.guesses[week] = data.guesses[week].filter(g => g.guesser !== currentGuesser || !g.albumKey);
+                for (const g of guessesToSave) {
+                    data.guesses[week].push({
+                        albumKey: g.albumKey,
+                        guesser: currentGuesser,
+                        guessedSubmitter: g.guessedSubmitter,
+                        week
+                    });
                 }
+                if (!data.finalizedGuesses) data.finalizedGuesses = {};
+                if (!data.finalizedGuesses[week]) data.finalizedGuesses[week] = [];
+                if (!data.finalizedGuesses[week].includes(currentGuesser)) {
+                    data.finalizedGuesses[week].push(currentGuesser);
+                }
+                if (!data.deals) data.deals = {};
+                if (!data.deals[week]) data.deals[week] = {};
+                data.deals[week][currentGuesser] = { offer, accepted: bankerChoice === true };
+
+                const saveResult = await Storage.saveData(data);
+                if (!saveResult || !saveResult.success) {
+                    throw new Error('Failed to save guesses');
+                }
+
+                await updateNavigationVisibility();
+                await renderPage('guess');
+                showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at midday on Friday once everyone has guessed, or at 4pm if anyone is still outstanding.', 'success');
+            } catch (error) {
+                console.error('Error saving guesses:', error);
+                showMessage('guess-message', 'Error saving guesses: ' + error.message, 'error');
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save & Finalize Guesses';
             }
         });
+    }
+
+    async function getMyLifelineList() {
+        const week = Storage.getCurrentWeek();
+        const byWeek = await Storage.getLifelinesForWeek(week);
+        return byWeek[currentGuesser] || [];
+    }
+
+    function findGuessGroupByAlbumKey(albumKey) {
+        return [...document.querySelectorAll('.guess-options')].find(g => g.getAttribute('data-album-key') === albumKey);
+    }
+
+    function rehydrateFiftyFiftyFromState(entries) {
+        entries.filter(e => e.type === 'fiftyFifty').forEach(entry => {
+            const group = findGuessGroupByAlbumKey(entry.albumKey);
+            if (!group) return;
+            const meta = parseAlbumMeta(group);
+            const allNames = getNamesFromGuessGroup(group);
+            const actual = meta.actualSubmitters || [];
+            const wrongPool = allNames.filter(n => !actual.includes(n));
+            const rand = randomForSeed(`${Storage.getCurrentWeek()}|${currentGuesser}|fiftyRehydrate|${entry.albumKey}`);
+            const keep = new Set(actual);
+            if (wrongPool.length > 0) {
+                keep.add(wrongPool[Math.floor(rand() * wrongPool.length)]);
+            }
+            applyFiftyFiftyKeepSet(group, keep);
+        });
+    }
+
+    document.querySelectorAll('.btn-lifeline-icon').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (guessesFinalized || !currentGuesser) return;
+            const albumKey = btn.getAttribute('data-album-key');
+            const action = btn.getAttribute('data-lifeline-action');
+            const group = findGuessGroupByAlbumKey(albumKey);
+            if (!group || !action) return;
+
+            const list = await getMyLifelineList();
+            if (action === 'fiftyFifty' && list.some(e => e.type === 'fiftyFifty')) return;
+            if (action === 'audience' && list.some(e => e.type === 'audience')) return;
+            if (action === 'phone' && list.some(e => e.type === 'phone')) return;
+
+            const meta = parseAlbumMeta(group);
+            const allNames = getNamesFromGuessGroup(group);
+            const actual = meta.actualSubmitters || [];
+            const week = Storage.getCurrentWeek();
+            const seedBase = `${week}|${currentGuesser}|${albumKey}|${action}`;
+
+            if (action === 'fiftyFifty') {
+                const wrongPool = allNames.filter(n => !actual.includes(n));
+                if (wrongPool.length === 0 || allNames.length <= 2) return;
+                const ok = await openConfirmModal({
+                    title: 'Use 50:50?',
+                    image: CHRIS_IMAGE_5050,
+                    bodyHtml: LIFELINE_CONFIRM_BODY,
+                    confirmLabel: 'Use lifeline',
+                    cancelLabel: 'Cancel'
+                });
+                if (!ok) return;
+                const rand = randomForSeed(`${seedBase}|fifty`);
+                const keep = new Set(actual);
+                keep.add(wrongPool[Math.floor(rand() * wrongPool.length)]);
+                const removed = allNames.length - keep.size;
+                const answerWord = removed === 1 ? 'answer' : 'answers';
+                const line = `Ok, Computer, take away ${removed} random wrong ${answerWord}, leaving the right answer and the one remaining wrong answer.`;
+                list.push({ albumKey, type: 'fiftyFifty' });
+                await Storage.saveGuesserLifelines(week, currentGuesser, list);
+                applyFiftyFiftyKeepSet(group, keep);
+                await openConfirmModal({
+                    title: 'Chris says…',
+                    image: CHRIS_IMAGE_5050,
+                    bodyHtml: `<p>${escapeHtml(line)}</p>`,
+                    confirmLabel: 'OK',
+                    cancelLabel: 'Close'
+                });
+                document.querySelectorAll('.btn-lifeline-icon[data-lifeline-action="fiftyFifty"]').forEach(b => { b.disabled = true; });
+                return;
+            }
+
+            if (action === 'audience') {
+                const ok = await openConfirmModal({
+                    title: 'Ask the Audience?',
+                    image: CHRIS_IMAGE_AUDIENCE,
+                    bodyHtml: LIFELINE_CONFIRM_BODY,
+                    confirmLabel: 'Use lifeline',
+                    cancelLabel: 'Cancel'
+                });
+                if (!ok) return;
+                list.push({ albumKey, type: 'audience' });
+                await Storage.saveGuesserLifelines(week, currentGuesser, list);
+                const audienceNames = getActiveNamesFromGuessGroup(group);
+                const rand = randomForSeed(`${seedBase}|audience`);
+                const weights = audienceStyleWeightsForNames(audienceNames, actual, rand);
+                const pct = percentagesFromWeights(weights);
+                const intro = `Ok, Audience, let's try and help ${escapeHtml(currentGuesser)} get up to a point. The question is: who submitted ${escapeHtml(meta.title || '')} by ${escapeHtml(meta.artist || '')}? `;
+                const keypad = formatAudienceKeypadLine(audienceNames);
+                const body = `<p>${intro}${keypad}</p>${buildAudienceBarsHtml(audienceNames, pct)}`;
+                await openConfirmModal({
+                    title: 'Chris & the Audience',
+                    image: CHRIS_IMAGE_AUDIENCE,
+                    bodyHtml: body,
+                    confirmLabel: 'OK',
+                    cancelLabel: 'Close'
+                });
+                document.querySelectorAll('.btn-lifeline-icon[data-lifeline-action="audience"]').forEach(b => { b.disabled = true; });
+                return;
+            }
+
+            if (action === 'phone') {
+                const ok = await openConfirmModal({
+                    title: 'Phone a Friend?',
+                    image: CHRIS_IMAGE_PHONE,
+                    bodyHtml: LIFELINE_CONFIRM_BODY,
+                    confirmLabel: 'Use lifeline',
+                    cancelLabel: 'Cancel'
+                });
+                if (!ok) return;
+                list.push({ albumKey, type: 'phone' });
+                await Storage.saveGuesserLifelines(week, currentGuesser, list);
+                const phoneNames = getActiveNamesFromGuessGroup(group);
+                const actualInPlay = actual.filter(n => phoneNames.includes(n));
+                const rand = randomForSeed(`${seedBase}|phone`);
+                const others = (await Storage.getTeamMembers()).filter(n => n !== currentGuesser);
+                const friend = others.length > 0 ? others[Math.floor(rand() * others.length)] : 'Friend';
+                const wrongOnly = phoneNames.filter(n => !actual.includes(n));
+                const pickTwoTips = () => {
+                    if (wrongOnly.length >= 2 && rand() < 0.2) {
+                        const sh = shuffleWithRand([...wrongOnly], randomForSeed(`${seedBase}|bothWrong`));
+                        return [sh[0], sh[1]];
+                    }
+                    const a = actualInPlay.length > 0 ? actualInPlay[Math.floor(rand() * actualInPlay.length)] : phoneNames[0];
+                    let b = wrongOnly.length > 0 ? wrongOnly[Math.floor(rand() * wrongOnly.length)] : (phoneNames.find(n => n !== a) || a);
+                    if (b === a && phoneNames.length > 1) {
+                        b = phoneNames.find(n => n !== a) || b;
+                    }
+                    return [a, b];
+                };
+                const [tip1, tip2] = pickTwoTips();
+                const albumTitle = meta.title || 'this album';
+                const albumArtist = meta.artist || 'this artist';
+                const answersPart = phoneNames.map((n, i) => `${LETTER_LABELS[i]}: ${n}`).join(', ');
+                const meChoicesLine = `Who picked ${albumTitle} by ${albumArtist}. ${answersPart}`;
+                removeGameshowModal();
+                const backdrop = document.createElement('div');
+                backdrop.className = 'gameshow-modal-backdrop';
+                backdrop.id = 'gameshow-modal-backdrop';
+                backdrop.innerHTML = `
+                    <div class="gameshow-modal-card phone-call-modal" role="dialog" aria-modal="true">
+                        <img src="${CHRIS_IMAGE_PHONE}" alt="" class="gameshow-host-img">
+                        <h3 class="gameshow-modal-title">Phone a Friend</h3>
+                        <div class="phone-call-log" id="phone-call-log"></div>
+                        <p class="phone-call-timer" id="phone-call-timer">0:30</p>
+                        <div class="gameshow-modal-actions">
+                            <button type="button" class="btn" id="phone-call-close-btn">Close</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(backdrop);
+                const logEl = backdrop.querySelector('#phone-call-log');
+                const timerEl = backdrop.querySelector('#phone-call-timer');
+                let finished = false;
+                let tenSecondMessageShown = false;
+                let fiveSecondMessageShown = false;
+                const pendingTimeouts = [];
+                const lines = [
+                    { speaker: 'Chris', text: `Hello, is that ${friend}?` },
+                    { speaker: friend, text: 'Yes, hello?' },
+                    { speaker: 'Chris', text: `Hello ${friend}, it's Chris Tarrant here from ${GAME_SHOW_TITLE}. I've got ${currentGuesser} with me, and they need your help. You've got thirty seconds. ${currentGuesser}, you can speak to ${friend} now.` },
+                    { speaker: currentGuesser, text: meChoicesLine },
+                    { speaker: friend, text: `I think it might be ${tip1}, or maybe ${tip2}.` }
+                ];
+                const lineDelaysMs = [1600, 1600, 1400, 1600, 1800];
+                const randCertainty = randomForSeed(`${seedBase}|phone|tenSec`);
+                const certaintyWeights = audienceStyleWeightsForNames(phoneNames, actual, randCertainty);
+                const certaintyPick = pickFromWeighted(phoneNames, certaintyWeights, randCertainty);
+                /** Sound confident on the phone (not a fair split across N options like the audience bars). */
+                const certaintySoundingPct = 80 + Math.floor(randCertainty() * 16);
+                const pushLine = (i) => {
+                    if (i >= lines.length || finished) return;
+                    const row = document.createElement('div');
+                    row.className = 'phone-call-line';
+                    row.innerHTML = `<strong>${escapeHtml(lines[i].speaker)}:</strong> ${escapeHtml(lines[i].text)}`;
+                    logEl.appendChild(row);
+                    logEl.scrollTop = logEl.scrollHeight;
+                    const delay = lineDelaysMs[i] ?? 1800;
+                    pendingTimeouts.push(setTimeout(() => pushLine(i + 1), delay));
+                };
+                const deadline = Date.now() + 30000;
+                const tick = () => {
+                    if (finished) return;
+                    const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+                    timerEl.textContent = `0:${String(left).padStart(2, '0')}`;
+                    if (left === 10 && !tenSecondMessageShown) {
+                        tenSecondMessageShown = true;
+                        const q = document.createElement('div');
+                        q.className = 'phone-call-line';
+                        q.innerHTML = `<strong>${escapeHtml(currentGuesser)}:</strong> How certain are you?`;
+                        logEl.appendChild(q);
+                        const a = document.createElement('div');
+                        a.className = 'phone-call-line';
+                        a.innerHTML = `<strong>${escapeHtml(friend)}:</strong> I'd say about ${certaintySoundingPct}%—I'd go with ${escapeHtml(certaintyPick)}.`;
+                        logEl.appendChild(a);
+                        logEl.scrollTop = logEl.scrollHeight;
+                    }
+                    if (left === 5 && !fiveSecondMessageShown) {
+                        fiveSecondMessageShown = true;
+                        const warn = document.createElement('div');
+                        warn.className = 'phone-call-line phone-call-line-five';
+                        warn.innerHTML = '<strong>Chris:</strong> I\'m going to have to hurry you.';
+                        logEl.appendChild(warn);
+                        logEl.scrollTop = logEl.scrollHeight;
+                    }
+                    if (left <= 0) {
+                        finished = true;
+                        const outOfTime = document.createElement('div');
+                        outOfTime.className = 'phone-call-line phone-call-line-timeout';
+                        outOfTime.innerHTML = '<strong>Chris:</strong> Sorry, we\'ve run out of time.';
+                        logEl.appendChild(outOfTime);
+                        timerEl.textContent = '0:00';
+                        logEl.scrollTop = logEl.scrollHeight;
+                        return;
+                    }
+                    pendingTimeouts.push(setTimeout(tick, 250));
+                };
+                pushLine(0);
+                tick();
+                const closeModal = () => {
+                    finished = true;
+                    pendingTimeouts.forEach(id => clearTimeout(id));
+                    removeGameshowModal();
+                };
+                backdrop.querySelector('#phone-call-close-btn').addEventListener('click', closeModal);
+                backdrop.addEventListener('click', (e) => {
+                    if (e.target === backdrop) closeModal();
+                });
+                document.querySelectorAll('.btn-lifeline-icon[data-lifeline-action="phone"]').forEach(b => { b.disabled = true; });
+            }
+        });
+    });
+
+    if (!guessesFinalized && currentGuesser) {
+        getMyLifelineList().then(list => rehydrateFiftyFiftyFromState(list));
     }
 
     // Count how many times each person is selected across all albums; enforce max 1 per person
@@ -1066,6 +1834,11 @@ function setupGuessPage() {
             const useRadio = group.getAttribute('data-use-radio') === 'true';
             const inputs = group.querySelectorAll(useRadio ? 'input[type="radio"]' : 'input[type="checkbox"]');
             inputs.forEach(input => {
+                const label = input.closest('.guess-option-label');
+                if (label?.classList.contains('lifeline-fifty-excluded')) {
+                    input.disabled = true;
+                    return;
+                }
                 const name = input.value;
                 const total = countByPerson[name] || 0;
                 const alreadySelectedHere = input.checked;
@@ -1077,7 +1850,6 @@ function setupGuessPage() {
         });
     }
 
-    const guessesFinalized = document.querySelector('.page.active')?.getAttribute('data-guesses-finalized') === 'true';
     updateMaxOnePerPersonState();
 
     // Auto-save on change (only if not finalized) - for checkboxes only (radio buttons handled on save)
@@ -1188,6 +1960,12 @@ function setupGuessPage() {
             });
         }
     });
+
+    if (guessGroups.length > 0 && currentGuesser) {
+        const week = Storage.getCurrentWeek();
+        maybeShowCrystalMazeDeadlinePopup(week);
+        hydrateCatchphraseAlbumArt(document).catch(() => {});
+    }
 }
 
 // Results Page
@@ -1205,6 +1983,7 @@ async function renderResultsPage() {
     
     return `
         <div class="page active">
+            ${previewModeBanner()}
             <h2 class="page-title">Results</h2>
             ${weeks.length > 1 ? `
                 <div class="week-selector">
@@ -1260,9 +2039,17 @@ async function renderResultsContent(week) {
                 key: key,
                 artist: sub.artist,
                 album: sub.album,
-                url: sub.url,
+                url: sub.url || '',
                 actualSubmitters: []
             };
+        } else {
+            const cur = albumGroups[key].url || '';
+            const next = sub.url || '';
+            if (extractSpotifyAlbumId(next) && !extractSpotifyAlbumId(cur)) {
+                albumGroups[key].url = next;
+            } else if (!cur && next) {
+                albumGroups[key].url = next;
+            }
         }
         albumGroups[key].actualSubmitters.push(sub.submitter);
     });
@@ -1278,12 +2065,14 @@ async function renderResultsContent(week) {
         }
     });
 
-    // Show grouped albums
+    // Show grouped albums (Family Fortunes–style staggered reveal; see initFortunesResultsReveal)
     let correctCount = 0;
     let guessedCount = 0;
-    const submissionsHtml = Object.values(albumGroups).map(albumGroup => {
+    const albumsList = Object.values(albumGroups);
+    const fortTotal = albumsList.length;
+    const submissionsHtml = albumsList.map((albumGroup, fortIdx) => {
         const actualSubmitters = [...new Set(albumGroup.actualSubmitters)];
-        const guessedSubmitters = guessesByAlbum[albumGroup.key] || [];
+        const guessedSubmitters = [...new Set(guessesByAlbum[albumGroup.key] || [])];
         const correctGuesses = guessedSubmitters.filter(g => actualSubmitters.includes(g));
         const missedSubmitters = actualSubmitters.filter(a => !guessedSubmitters.includes(a));
         const hasGuesses = guessedSubmitters.length > 0;
@@ -1298,28 +2087,124 @@ async function renderResultsContent(week) {
             ? (allCorrect ? '✓ Correct' : '✗ Incorrect')
             : '';
 
+        const albumTitleEsc = escapeHtml(albumGroup.album);
+        const albumArtistEsc = escapeHtml(albumGroup.artist);
+        const youLineInner = hasGuesses
+            ? `<strong>You said:</strong> ${guessedSubmitters.map(s => escapeHtml(s)).join(', ')}`
+            : '<strong>You said:</strong> —';
+        const surveyLineInner = `<strong>Our survey said:</strong> ${actualSubmitters.map(s => escapeHtml(s)).join(', ')}`;
+
+        const roundLine = escapeHtml(`Round ${fortIdx + 1} of ${fortTotal}`);
+
         return `
-            <div class="result-item ${hasGuesses ? (allCorrect ? 'correct' : 'incorrect') : ''}">
-                <h4>${albumGroup.album} - ${albumGroup.artist}</h4>
-                <p><strong>Submitted by:</strong> ${actualSubmitters.join(', ')}</p>
-                ${hasGuesses ? `<p><strong>Result:</strong> ${resultMessage}</p>` : ''}
+            <div class="result-item result-item--pending result-item--fortunes"
+                 data-fortunes-index="${fortIdx}"
+                 data-has-guesses="${hasGuesses ? 'true' : 'false'}"
+                 data-all-correct="${allCorrect ? 'true' : 'false'}">
+                <div class="fortunes-card-shell">
+                    <div class="fortunes-card-content" inert>
+                        <h4>${albumTitleEsc} — ${albumArtistEsc}</h4>
+                        <p class="result-reveal-line result-reveal-line--you" hidden>${youLineInner}</p>
+                        <p class="result-reveal-line result-reveal-line--survey" hidden>${surveyLineInner}</p>
+                        ${hasGuesses ? `<p class="result-reveal-line result-reveal-line--verdict" hidden><strong>Result:</strong> ${resultMessage}</p>` : ''}
+                    </div>
+                    <div class="fortunes-card-board" aria-hidden="true">
+                        <div class="fortunes-board-strip">
+                            <img src="${LES_DENNIS_IMAGE}" alt="" class="fortunes-board-les" width="48" height="48">
+                            <div class="fortunes-board-copy">
+                                <span class="fortunes-board-kicker">Our survey says…</span>
+                                <span class="fortunes-board-round">${roundLine}</span>
+                            </div>
+                        </div>
+                        <p class="fortunes-board-hint">The answer’s under the board — here it comes!</p>
+                    </div>
+                </div>
             </div>
         `;
     }).join('');
 
-    const scoreHeader = guessedCount > 0
-        ? `<p style="margin-bottom: 20px;"><strong>Your score:</strong> ${correctCount}/${guessedCount} correct</p>`
+    const dataForWeek = await Storage.getData();
+    const weekLifelinesMap = dataForWeek.lifelines?.[week] || {};
+
+    function lifelineMultFor(guesser, albumKey) {
+        const list = weekLifelinesMap[guesser];
+        if (!Array.isArray(list)) return 1;
+        const n = list.filter(e => e && e.albumKey === albumKey).length;
+        return 1 / Math.pow(2, n);
+    }
+
+    let myOnlyOwnAlbumCorrect = false;
+    let myMissedOwnAlbum = false;
+    let myActualPoints = 0;
+
+    if (currentGuesser && guessedCount > 0) {
+        let albumsAllCorrect = 0;
+        let ownAlbumAllCorrect = false;
+        Object.values(albumGroups).forEach(ag => {
+            const actualSubmitters = [...new Set(ag.actualSubmitters)];
+            const guessedSubmitters = guessesByAlbum[ag.key] || [];
+            const correctGuesses = guessedSubmitters.filter(g => actualSubmitters.includes(g));
+            const missedSubmitters = actualSubmitters.filter(a => !guessedSubmitters.includes(a));
+            const hasGuesses = guessedSubmitters.length > 0;
+            const allCorrect = hasGuesses && missedSubmitters.length === 0 && correctGuesses.length === actualSubmitters.length;
+            if (allCorrect) albumsAllCorrect++;
+            if (hasGuesses && actualSubmitters.includes(currentGuesser) && !guessedSubmitters.includes(currentGuesser)) {
+                myMissedOwnAlbum = true;
+            }
+            if (hasGuesses && allCorrect && actualSubmitters.includes(currentGuesser)) {
+                ownAlbumAllCorrect = true;
+            }
+            if (hasGuesses) {
+                const mult = lifelineMultFor(currentGuesser, ag.key);
+                myActualPoints += correctGuesses.length * mult;
+            }
+        });
+        myOnlyOwnAlbumCorrect = albumsAllCorrect === 1 && ownAlbumAllCorrect && guessedCount > 1;
+    }
+
+    let scoreHeader = '';
+    if (currentGuesser && guessedCount > 0) {
+        const s = results.scores[currentGuesser];
+        const actualStr = formatScoreNum(s?.correct ?? myActualPoints);
+        const pub = s?.publishedCorrect != null ? s.publishedCorrect : (s?.correct ?? myActualPoints);
+        const pubStr = formatScoreNum(pub);
+        const deal = s?.deal;
+        let dealLine = '';
+        if (deal && typeof deal.offer === 'number') {
+            dealLine = deal.accepted
+                ? `<br><span class="deal-result-line">Banker offered ${formatScoreNum(deal.offer)}. You took the deal. Actual score: ${actualStr}.</span>`
+                : `<br><span class="deal-result-line">Banker offered ${formatScoreNum(deal.offer)}. No deal — your score stays ${actualStr}.</span>`;
+        }
+        scoreHeader = `<p style="margin-bottom: 20px;"><strong>Your score:</strong> ${pubStr} points (${correctCount}/${guessedCount} albums fully correct)${dealLine}</p>`;
+    }
+
+    const cameoBullseye = currentGuesser && guessedCount > 0 && myOnlyOwnAlbumCorrect
+        ? `<div class="results-cameo results-cameo--bullseye">
+            <img src="${JIM_BOWEN_IMAGE}" alt="Jim Bowen" class="results-cameo-img">
+            <p class="results-cameo-text">Let's have a look at what you could have won!</p>
+           </div>`
+        : '';
+    const cameoBlobby = currentGuesser && guessedCount > 0 && !myOnlyOwnAlbumCorrect && (myActualPoints === 0 || myMissedOwnAlbum)
+        ? `<div class="results-cameo results-cameo--blobby">
+            <img src="${MR_BLOBBY_IMAGE}" alt="Mr Blobby" class="results-cameo-img">
+            <p class="results-cameo-text">Blobby blob blob!</p>
+           </div>`
         : '';
 
     // Calculate leaderboard (with ties: same score = same rank, no highlight when tied)
     const leaderboardSorted = Object.entries(results.scores)
         .filter(([member, score]) => score.total > 0)
-        .map(([member, score]) => ({
-            member,
-            correct: score.correct,
-            total: score.total,
-            percentage: score.total > 0 ? ((score.correct / score.total) * 100).toFixed(1) : 0
-        }))
+        .map(([member, score]) => {
+            const pub = score.publishedCorrect != null ? score.publishedCorrect : score.correct;
+            return {
+                member,
+                correct: pub,
+                actualCorrect: score.correct,
+                total: score.total,
+                percentage: score.total > 0 ? ((pub / score.total) * 100).toFixed(1) : 0,
+                deal: score.deal
+            };
+        })
         .sort((a, b) => {
             if (b.correct !== a.correct) return b.correct - a.correct;
             return b.percentage - a.percentage;
@@ -1333,22 +2218,37 @@ async function renderResultsContent(week) {
             <h3 style="margin-top: 30px; margin-bottom: 20px;">Weekly Leaderboard</h3>
             ${firstPlace.length > 0 ? `
                 <div class="leaderboard-first-row">
-                    ${firstPlace.map((entry) => `
+                    ${firstPlace.map((entry) => {
+                        const main = `${formatScoreNum(entry.correct)}/${entry.total} (${entry.percentage}%)`;
+                        const actualNote = entry.deal?.accepted
+                            ? `<span class="leaderboard-score-under">Actual: ${formatScoreNum(entry.actualCorrect)}</span>`
+                            : '';
+                        return `
                         <div class="leaderboard-item ${entry.rankClass}">
                             <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
-                            <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                            ${firstPlace.length > 1
+                                ? `<span class="leaderboard-score-block">${main}${actualNote}</span>`
+                                : `<span>${main}</span>${actualNote}`
+                            }
                         </div>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
             ` : ''}
             ${restPlace.length > 0 ? `
                 <div class="leaderboard-rest-grid ${restPlace.length === 1 ? 'rest-count-1' : restPlace.length === 2 ? 'rest-count-2' : ''}">
-                    ${restPlace.map((entry) => `
+                    ${restPlace.map((entry) => {
+                        const main = `${formatScoreNum(entry.correct)}/${entry.total} (${entry.percentage}%)`;
+                        const actualNote = entry.deal?.accepted
+                            ? `<span class="leaderboard-score-under">Actual: ${formatScoreNum(entry.actualCorrect)}</span>`
+                            : '';
+                        return `
                         <div class="leaderboard-item ${entry.rankClass}">
                             <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
-                            <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                            <span class="leaderboard-score-block">${main}${actualNote}</span>
                         </div>
-                    `).join('')}
+                    `;
+                    }).join('')}
                 </div>
             ` : ''}
         </div>
@@ -1357,11 +2257,19 @@ async function renderResultsContent(week) {
     content.innerHTML = `
         <h3>Submissions & Results</h3>
         ${scoreHeader}
-        <div class="results-grid">
+        ${cameoBullseye}
+        ${cameoBlobby}
+        <div class="fortunes-reveal-wrap" aria-live="polite">
+            <div class="results-grid fortunes-results-grid">
             ${submissionsHtml}
+            </div>
         </div>
         ${leaderboardHtml}
     `;
+
+    const fortunesGrid = content.querySelector('.fortunes-results-grid');
+    if (fortunesGrid) initFortunesResultsReveal(fortunesGrid);
+    hydrateCatchphraseAlbumArt(content).catch(() => {});
 }
 
 // Stats Page
@@ -1404,7 +2312,10 @@ async function renderStatsPage() {
         const uniqueWeekMembers = [...new Set(weekMembers)];
         members.forEach(member => {
             if (results.scores[member] && results.scores[member].total > 0) {
-                statsForDisplay[member].totalCorrect += results.scores[member].correct;
+                const pub = results.scores[member].publishedCorrect != null
+                    ? results.scores[member].publishedCorrect
+                    : results.scores[member].correct;
+                statsForDisplay[member].totalCorrect += pub;
                 statsForDisplay[member].totalGuesses += results.scores[member].total;
                 statsForDisplay[member].weeksPlayed++;
             }
@@ -1458,6 +2369,7 @@ async function renderStatsPage() {
 
     return `
         <div class="page active">
+            ${previewModeBanner()}
             <h2 class="page-title">Statistics</h2>
             
             <div class="stats-grid">
@@ -1472,7 +2384,7 @@ async function renderStatsPage() {
                                     ${firstPlace.map((entry) => `
                                         <div class="leaderboard-item ${entry.rankClass}">
                                             <span><strong>${entry.displayRank}</strong> ${entry.member}<small class="leaderboard-weeks-played"> ${entry.weeksPlayed || 0} weeks played</small></span>
-                                            <span>${entry.totalCorrect}/${entry.totalGuesses} (${entry.accuracy}%)</span>
+                                            <span>${formatScoreNum(entry.totalCorrect)}/${entry.totalGuesses} (${entry.accuracy}%)</span>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -1482,7 +2394,7 @@ async function renderStatsPage() {
                                     ${restPlace.map((entry) => `
                                         <div class="leaderboard-item ${entry.rankClass}">
                                             <span><strong>${entry.displayRank}</strong> ${entry.member}<small class="leaderboard-weeks-played"> ${entry.weeksPlayed || 0} weeks played</small></span>
-                                            <span>${entry.totalCorrect}/${entry.totalGuesses} (${entry.accuracy}%)</span>
+                                            <span>${formatScoreNum(entry.totalCorrect)}/${entry.totalGuesses} (${entry.accuracy}%)</span>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -1497,12 +2409,17 @@ async function renderStatsPage() {
             ${weekStats.map(weekStat => {
                 const weekLeaderboardSorted = Object.entries(weekStat.results)
                     .filter(([member, score]) => score.total > 0)
-                    .map(([member, score]) => ({
-                        member,
-                        correct: score.correct,
-                        total: score.total,
-                        percentage: score.total > 0 ? ((score.correct / score.total) * 100).toFixed(1) : 0
-                    }))
+                    .map(([member, score]) => {
+                        const pub = score.publishedCorrect != null ? score.publishedCorrect : score.correct;
+                        return {
+                            member,
+                            correct: pub,
+                            actualCorrect: score.correct,
+                            total: score.total,
+                            percentage: score.total > 0 ? ((pub / score.total) * 100).toFixed(1) : 0,
+                            deal: score.deal
+                        };
+                    })
                     .sort((a, b) => {
                         if (b.correct !== a.correct) return b.correct - a.correct;
                         return b.percentage - a.percentage;
@@ -1518,22 +2435,37 @@ async function renderStatsPage() {
                         ${weekLeaderboard.length > 0 ? `
                             ${firstPlace.length > 0 ? `
                                 <div class="leaderboard-first-row ${firstPlace.length > 1 ? 'first-row-multi' : ''}">
-                                    ${firstPlace.map((entry) => `
+                                    ${firstPlace.map((entry) => {
+                                        const line = `${formatScoreNum(entry.correct)}/${entry.total} (${entry.percentage}%)`;
+                                        const actual = entry.deal?.accepted
+                                            ? `<span class="leaderboard-score-under">Actual: ${formatScoreNum(entry.actualCorrect)}</span>`
+                                            : '';
+                                        return `
                                         <div class="leaderboard-item ${entry.rankClass}">
                                             <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
-                                            ${firstPlace.length > 1 ? `<span class="leaderboard-score-under">${entry.correct}/${entry.total} (${entry.percentage}%)</span>` : `<span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>`}
+                                            ${firstPlace.length > 1
+                                                ? `<span class="leaderboard-score-block">${line}${actual}</span>`
+                                                : `<span>${line}</span>${actual}`
+                                            }
                                         </div>
-                                    `).join('')}
+                                    `;
+                                    }).join('')}
                                 </div>
                             ` : ''}
                             ${restPlace.length > 0 ? `
 <div class="leaderboard-rest-grid ${restPlace.length === 1 ? 'rest-count-1' : restPlace.length === 2 ? 'rest-count-2' : ''} ${restPlace.length > 3 ? 'rest-stack' : ''}">
-                                        ${restPlace.map((entry) => `
+                                        ${restPlace.map((entry) => {
+                                        const line = `${formatScoreNum(entry.correct)}/${entry.total} (${entry.percentage}%)`;
+                                        const actual = entry.deal?.accepted
+                                            ? `<span class="leaderboard-score-under">Actual: ${formatScoreNum(entry.actualCorrect)}</span>`
+                                            : '';
+                                        return `
                                         <div class="leaderboard-item ${entry.rankClass}">
                                             <span><strong>${entry.displayRank}</strong> ${entry.member}</span>
-                                            <span>${entry.correct}/${entry.total} (${entry.percentage}%)</span>
+                                            <span class="leaderboard-score-block">${line}${actual}</span>
                                         </div>
-                                    `).join('')}
+                                    `;
+                                    }).join('')}
                                 </div>
                             ` : ''}
                         ` : '<p>No guesses recorded for this week.</p>'}
@@ -1553,6 +2485,7 @@ async function renderPlaylistPage() {
     if (submissions.length === 0) {
         return `
             <div class="page active">
+                ${previewModeBanner()}
                 <h2 class="page-title">Spotify Playlist</h2>
                 <div class="empty-state">
                     <p>No albums submitted yet this week.</p>
@@ -1565,20 +2498,16 @@ async function renderPlaylistPage() {
     const shuffled = seededShuffle([...submissions], `${week}|${idSig}`);
 
     // Extract Spotify album IDs from URLs (order follows shuffled list)
-    const getSpotifyId = (url) => {
-        const match = url.match(/album\/([a-zA-Z0-9]+)/);
-        return match ? match[1] : null;
-    };
-
     const withSpotify = shuffled
         .map(sub => {
-            const spotifyId = sub.url && sub.url.includes('spotify.com') ? getSpotifyId(sub.url) : null;
+            const spotifyId = sub.url && sub.url.includes('spotify.com') ? extractSpotifyAlbumId(sub.url) : null;
             return spotifyId ? { ...sub, spotifyId } : null;
         })
         .filter(Boolean);
 
     return `
         <div class="page active">
+            ${previewModeBanner()}
             <h2 class="page-title">Spotify Playlist</h2>
             <p style="margin-bottom: 20px; color: #666666;">
                 Week: <strong>${week}</strong> | Total Albums: ${submissions.length} | With Spotify URLs: ${withSpotify.length}
@@ -1653,6 +2582,7 @@ async function renderAdminPage() {
 
     const members = await Storage.getTeamMembers();
     const currentWeek = Storage.getCurrentWeek();
+    const previewOn = Storage.isPreviewMode();
     const submissions = await Storage.getSubmissions(currentWeek);
     const guesses = await Storage.getGuesses(currentWeek);
     const weekTheme = await Storage.getWeekTheme(currentWeek);
@@ -1665,6 +2595,33 @@ async function renderAdminPage() {
         <div class="page active">
             <h2 class="page-title">Admin Panel</h2>
             <button class="btn btn-secondary" id="logout-btn" style="margin-bottom: 20px;">Logout</button>
+
+            <div class="admin-section admin-preview-section">
+                <h2>Preview mode (local testing)</h2>
+                <p style="color: #666666; margin-bottom: 15px; font-size: 0.95rem;">
+                    Test lifelines, the banker, and results <strong>without writing real submissions or guesses to the shared Gist</strong>.
+                    Mock data for <strong>${escapeHtml(currentWeek)}</strong> is stored only in this browser. Team members still come from the real list.
+                </p>
+                <p style="margin-bottom: 12px;">
+                    Status: <strong>${previewOn ? 'On' : 'Off'}</strong>
+                    ${previewOn ? ` · Mock submissions this week: ${submissions.length}` : ''}
+                </p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="button" class="btn" id="preview-enable-btn" style="background: #7b2cbf;" ${previewOn ? 'disabled' : ''}>
+                        Enable preview &amp; seed mock albums
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="preview-off-btn" ${!previewOn ? 'disabled' : ''}>
+                        Turn off preview
+                    </button>
+                    <button type="button" class="btn" id="preview-reset-lifelines-btn" style="background: #5c4d7d;" ${!previewOn ? 'disabled' : ''}>
+                        Reset lifelines (preview)
+                    </button>
+                </div>
+                <p style="color: #666666; margin-top: 12px; font-size: 0.9rem;">
+                    After enabling, open <strong>Guess</strong>, pick your name from the team list, and use the Chris / Noel flows. Results and Stats unlock immediately in preview so you can check layouts.
+                </p>
+                <div id="preview-mode-message" style="margin-top: 10px;"></div>
+            </div>
             
             <div class="admin-section">
                 <h2>Add Team Member</h2>
@@ -1785,6 +2742,7 @@ async function setupAdminPage() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
             Storage.setAdminLoggedIn(false);
+            Storage.setPreviewMode(false);
             await updateNavigationVisibility();
             // If on settings page, redirect to admin
             if (currentPage === 'settings') {
@@ -1792,6 +2750,61 @@ async function setupAdminPage() {
             } else {
                 await renderPage('admin');
             }
+        });
+    }
+
+    const previewEnableBtn = document.getElementById('preview-enable-btn');
+    if (previewEnableBtn) {
+        previewEnableBtn.addEventListener('click', async () => {
+            previewEnableBtn.disabled = true;
+            previewEnableBtn.textContent = 'Enabling…';
+            try {
+                Storage.setPreviewMode(true);
+                const result = await Storage.seedPreviewWeekMockSubmissions();
+                if (!result.success) {
+                    Storage.setPreviewMode(false);
+                    showMessage('preview-mode-message', result.message || 'Could not seed preview.', 'error');
+                    return;
+                }
+                await updateNavigationVisibility();
+                showMessage('preview-mode-message', result.message || 'Preview enabled.', 'success');
+                setTimeout(async () => {
+                    await renderPage('admin');
+                }, 600);
+            } catch (error) {
+                Storage.setPreviewMode(false);
+                showMessage('preview-mode-message', error.message || 'Error enabling preview.', 'error');
+                previewEnableBtn.disabled = false;
+                previewEnableBtn.textContent = 'Enable preview & seed mock albums';
+            }
+        });
+    }
+
+    const previewOffBtn = document.getElementById('preview-off-btn');
+    if (previewOffBtn) {
+        previewOffBtn.addEventListener('click', async () => {
+            if (!confirm('Turn off preview mode? Local mock guesses for this week will be discarded.')) return;
+            Storage.setPreviewMode(false);
+            await updateNavigationVisibility();
+            showMessage('preview-mode-message', 'Preview mode off.', 'success');
+            setTimeout(async () => {
+                await renderPage('admin');
+            }, 400);
+        });
+    }
+
+    const previewResetLifelinesBtn = document.getElementById('preview-reset-lifelines-btn');
+    if (previewResetLifelinesBtn) {
+        previewResetLifelinesBtn.addEventListener('click', async () => {
+            const result = Storage.resetPreviewLifelines();
+            if (!result.success) {
+                showMessage('preview-mode-message', result.message || 'Could not reset lifelines.', 'error');
+                return;
+            }
+            showMessage('preview-mode-message', result.message || 'Lifelines reset.', 'success');
+            setTimeout(async () => {
+                await renderPage(currentPage);
+            }, 400);
         });
     }
 
