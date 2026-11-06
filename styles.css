@@ -643,6 +643,75 @@ main {
     flex-shrink: 0;
 }
 
+.theme-banner--week {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    gap: 12px;
+}
+
+.theme-harry-hill--week {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    object-position: center 28%;
+}
+
+.harry-preview-note {
+    color: #666666;
+    margin-bottom: 16px;
+}
+
+.harry-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+
+.harry-preview-item {
+    margin: 0;
+    text-align: center;
+}
+
+.theme-harry-hill--preview {
+    width: 120px;
+    height: 120px;
+    display: block;
+    margin: 0 auto 8px;
+    object-position: center 28%;
+}
+
+.harry-preview-item figcaption {
+    font-size: 0.75rem;
+    line-height: 1.35;
+    word-break: break-word;
+    color: var(--text-primary);
+}
+
+.harry-preview-tag,
+.harry-preview-error {
+    display: block;
+    margin-top: 4px;
+    font-weight: 700;
+}
+
+.harry-preview-tag {
+    color: var(--brand-navy);
+}
+
+.harry-preview-error,
+.harry-preview-item.is-broken figcaption {
+    color: var(--brand-dark-red);
+}
+
+.harry-preview-item.is-broken img {
+    opacity: 0.35;
+}
+
+.theme-banner--week .theme-banner-text {
+    font-size: 0.95rem;
+    line-height: 1.35;
+}
+
 .theme-banner-content {
     flex: 1;
     min-width: 0;
@@ -714,5 +783,9 @@ main {
     
     main {
         padding: 20px;
+    }
+
+    .week-by-week-grid {
+        grid-template-columns: 1fr;
     }
 }

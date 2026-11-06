@@ -6,6 +6,16 @@ let selectedWeek = Storage.getCurrentWeek();
 let isLoading = false;
 let currentWeekTheme = null;
 const HARRY_HILL_IMAGE = 'images/harry-hill.jpg';
+const HARRY_HILL_NO_THEME_IMAGE = 'images/harry-hill/JS47551015.avif';
+const HARRY_HILL_IMAGES = [
+    'images/harry-hill/2609.jpg',
+    'images/harry-hill/3000.jpg',
+    'images/harry-hill/harry_hill_cin_2013_1.jpg',
+    'images/harry-hill/Harry-Hill-BBC-pay-salary-net-worth-World-Of-TV-Burp-news-latest-update-2622680.jpg',
+    'images/harry-hill/harry_hill_image2.jpg',
+    'images/harry-hill/Harry-Hill-WEB.jpg',
+    'images/harry-hill/JS47551015.avif'
+];
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
@@ -193,6 +203,33 @@ function isBeforeMidday() {
     return now.getHours() < 12;
 }
 
+const EARLY_PAGE_ACCESS_KEY = 'adminEarlyPageAccess';
+
+function isEarlyPageAccessEnabled() {
+    return Storage.isAdminLoggedIn() && sessionStorage.getItem(EARLY_PAGE_ACCESS_KEY) === '1';
+}
+
+function setEarlyPageAccess(enabled) {
+    if (enabled) {
+        sessionStorage.setItem(EARLY_PAGE_ACCESS_KEY, '1');
+    } else {
+        sessionStorage.removeItem(EARLY_PAGE_ACCESS_KEY);
+    }
+}
+
+function isGuessPageLocked() {
+    return isBeforeGuessTime() && !isEarlyPageAccessEnabled();
+}
+
+function isMiddayPageLocked() {
+    return isBeforeMidday() && !isEarlyPageAccessEnabled();
+}
+
+async function canViewRevealedResults(weekStr) {
+    if (isEarlyPageAccessEnabled()) return true;
+    return isWeekResultsRevealed(weekStr);
+}
+
 /** Midday on the Friday that identifies a game week (weekStr is DD/MM/YYYY). */
 function getWeekFridayMidday(weekStr) {
     const [d, m, y] = weekStr.split('/').map(Number);
@@ -314,6 +351,73 @@ function renderThemeBanner() {
     `;
 }
 
+/** Same photo for a given week for everyone, chosen from HARRY_HILL_IMAGES. */
+function pickHarryHillImage(seedKey) {
+    return seededShuffle(HARRY_HILL_IMAGES, String(seedKey))[0];
+}
+
+function renderHarryHillPhotoExamples() {
+    const fileName = (src) => src.split('/').pop();
+    return `
+        <div class="admin-section">
+            <h2>Harry Hill photos</h2>
+            <p class="harry-preview-note">
+                Each photo as it is cropped on a week card. Weeks with no saved theme always use
+                <strong>${escapeHtml(fileName(HARRY_HILL_NO_THEME_IMAGE))}</strong>.
+            </p>
+            <div class="harry-preview-grid">
+                ${HARRY_HILL_IMAGES.map(src => {
+                    const name = fileName(src);
+                    const isNoTheme = src === HARRY_HILL_NO_THEME_IMAGE;
+                    return `
+                        <figure class="harry-preview-item">
+                            <img src="${src}" alt="${escapeHtml(name)}" class="theme-harry-hill theme-harry-hill--preview">
+                            <figcaption>
+                                <span>${escapeHtml(name)}</span>
+                                ${isNoTheme ? '<span class="harry-preview-tag">No theme</span>' : ''}
+                            </figcaption>
+                        </figure>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function setupHarryHillPhotoExamples() {
+    document.querySelectorAll('.harry-preview-item img').forEach(img => {
+        const markBroken = () => {
+            const item = img.closest('.harry-preview-item');
+            if (!item || item.classList.contains('is-broken')) return;
+            item.classList.add('is-broken');
+            const caption = item.querySelector('figcaption');
+            if (caption) {
+                caption.insertAdjacentHTML('beforeend', '<span class="harry-preview-error">Failed to load</span>');
+            }
+        };
+        if (img.complete && img.naturalWidth === 0) {
+            markBroken();
+        } else {
+            img.addEventListener('error', markBroken);
+        }
+    });
+}
+
+function renderWeekThemeBanner(week, theme) {
+    const image = theme?.text ? pickHarryHillImage(week) : HARRY_HILL_NO_THEME_IMAGE;
+    const label = theme?.text ? 'Theme of the Week' : '';
+    const text = theme?.text ? escapeHtml(theme.text) : 'No theme recorded for this week.';
+    return `
+        <div class="theme-banner theme-banner--week">
+            <img src="${image}" alt="Harry Hill" class="theme-harry-hill theme-harry-hill--week">
+            <div class="theme-banner-content">
+                ${label ? `<div class="theme-banner-label">${label}</div>` : ''}
+                <div class="theme-banner-text">${text}</div>
+            </div>
+        </div>
+    `;
+}
+
 /** Deterministic shuffle so playlist order is random for the week but stable for everyone. */
 function seededShuffle(array, seedKey) {
     let seed = 0;
@@ -345,7 +449,7 @@ async function updateNavigationVisibility() {
 
     const guessBtn = document.querySelector('.nav-btn[data-page="guess"]');
     if (guessBtn) {
-        if (isBeforeGuessTime()) {
+        if (isGuessPageLocked()) {
             guessBtn.disabled = true;
             guessBtn.title = 'Available from 10:30';
         } else {
@@ -356,7 +460,7 @@ async function updateNavigationVisibility() {
 
     const resultsBtn = document.querySelector('.nav-btn[data-page="results"]');
     if (resultsBtn) {
-        if (isBeforeMidday()) {
+        if (isMiddayPageLocked()) {
             resultsBtn.disabled = true;
             resultsBtn.title = 'Available from midday';
         } else {
@@ -367,7 +471,7 @@ async function updateNavigationVisibility() {
 
     const statsBtn = document.querySelector('.nav-btn[data-page="stats"]');
     if (statsBtn) {
-        if (isBeforeMidday()) {
+        if (isMiddayPageLocked()) {
             statsBtn.disabled = true;
             statsBtn.title = 'Available from midday';
         } else {
@@ -391,13 +495,13 @@ function setupNavigation() {
 async function navigateToPage(page) {
     await updateNavigationVisibility();
 
-    if (page === 'guess' && isBeforeGuessTime()) {
+    if (page === 'guess' && isGuessPageLocked()) {
         return; // Guess button is disabled, but guard in case of hash/navigation
     }
-    if (page === 'results' && isBeforeMidday()) {
+    if (page === 'results' && isMiddayPageLocked()) {
         return; // Results button is disabled, but guard in case of hash/navigation
     }
-    if (page === 'stats' && isBeforeMidday()) {
+    if (page === 'stats' && isMiddayPageLocked()) {
         return;
     }
     currentPage = page;
@@ -433,7 +537,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'guess':
-                if (isBeforeGuessTime()) {
+                if (isGuessPageLocked()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Guess</h2>
@@ -448,7 +552,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'results':
-                if (isBeforeMidday()) {
+                if (isMiddayPageLocked()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Results</h2>
@@ -463,7 +567,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'stats':
-                if (isBeforeMidday()) {
+                if (isMiddayPageLocked()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Stats</h2>
@@ -1165,7 +1269,7 @@ async function renderResultsContent(week) {
     
     if (!content) return;
 
-    if (!(await isWeekResultsRevealed(week))) {
+    if (!(await canViewRevealedResults(week))) {
         content.innerHTML = `<div class="empty-state">${await renderResultsWaitingMessage(week)}</div>`;
         return;
     }
@@ -1293,7 +1397,7 @@ async function renderStatsPage() {
     const allWeeks = await Storage.getAllWeeks();
     const weeks = [];
     for (const w of allWeeks) {
-        if (await isWeekResultsRevealed(w)) {
+        if (await canViewRevealedResults(w)) {
             weeks.push(w);
         }
     }
@@ -1372,9 +1476,11 @@ async function renderStatsPage() {
     const weekStats = [];
     for (const week of weeks) {
         const weekResults = await Storage.getWeekResults(week);
+        const theme = await Storage.getWeekTheme(week);
         weekStats.push({
             week,
-            results: weekResults.scores
+            results: weekResults.scores,
+            theme
         });
     }
 
@@ -1436,6 +1542,7 @@ async function renderStatsPage() {
                 return `
                     <div class="stat-card week-card">
                         <h3>Week of ${weekStat.week}</h3>
+                        ${renderWeekThemeBanner(weekStat.week, weekStat.theme)}
                         ${weekLeaderboard.length > 0 ? `
                             ${firstPlace.length > 0 ? `
                                 <div class="leaderboard-first-row ${firstPlace.length > 1 ? 'first-row-multi' : ''}">
@@ -1652,6 +1759,8 @@ async function renderAdminPage() {
                 <div id="clear-theme-message" style="margin-top: 10px;"></div>
             </div>
 
+            ${renderHarryHillPhotoExamples()}
+
             <div class="admin-section">
                 <h2>Clear This Week's Data (Testing)</h2>
                 <p style="color: #666666; margin-bottom: 15px;">
@@ -1679,6 +1788,7 @@ async function renderAdminPage() {
 }
 
 async function setupAdminPage() {
+    setupHarryHillPhotoExamples();
     const loginForm = document.getElementById('admin-login-form');
     if (loginForm) {
         loginForm.addEventListener('submit', async (e) => {
@@ -1703,6 +1813,7 @@ async function setupAdminPage() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
             Storage.setAdminLoggedIn(false);
+            setEarlyPageAccess(false);
             await updateNavigationVisibility();
             // If on settings page, redirect to admin
             if (currentPage === 'settings') {
@@ -1911,10 +2022,29 @@ function renderSettingsPage() {
     const gistId = Storage.getGistId();
     const hasToken = !!Storage.getGitHubToken();
     const currentUrl = window.location.origin + window.location.pathname;
+    const earlyAccess = isEarlyPageAccessEnabled();
 
     return `
         <div class="page active">
             <h2 class="page-title">Settings</h2>
+
+            <div class="admin-section">
+                <h2>Early access</h2>
+                <p style="color: #666666; margin-bottom: 15px;">
+                    Guess opens at 10:30. Results and Stats open at midday, and this week’s scores stay hidden until the Friday reveal.
+                    Turn this on to open those pages on this browser. Everyone else still follows the normal schedule.
+                    It stays on until you turn it off, log out, or close this tab.
+                </p>
+                <p style="margin-bottom: 15px;">
+                    Status: ${earlyAccess
+                        ? '<strong>On</strong> — Guess, Results, and Stats are open on this browser.'
+                        : '<strong>Off</strong> — pages follow the normal schedule.'}
+                </p>
+                <button class="btn ${earlyAccess ? 'btn-secondary' : ''}" id="toggle-early-access-btn" ${earlyAccess ? '' : 'style="background: #00a8cc;"'}>
+                    ${earlyAccess ? 'Turn off early access' : 'Enable early access'}
+                </button>
+                <div id="early-access-message" style="margin-top: 10px;"></div>
+            </div>
             
             ${isConfigured ? `
                 <div class="alert alert-success" style="margin-bottom: 30px;">
@@ -2003,6 +2133,19 @@ function renderSettingsPage() {
 }
 
 function setupSettingsPage() {
+    const earlyAccessBtn = document.getElementById('toggle-early-access-btn');
+    if (earlyAccessBtn) {
+        earlyAccessBtn.addEventListener('click', async () => {
+            const turningOn = !isEarlyPageAccessEnabled();
+            if (turningOn && !confirm('Open Guess, Results, and Stats on this browser? Other players will still see the normal schedule.')) {
+                return;
+            }
+            setEarlyPageAccess(turningOn);
+            await updateNavigationVisibility();
+            await renderPage('settings');
+        });
+    }
+
     // Copy URL button
     const copyUrlBtn = document.getElementById('copy-url-btn');
     if (copyUrlBtn) {
