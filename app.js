@@ -202,34 +202,6 @@ function isBeforeMidday() {
     const now = new Date();
     return now.getHours() < 12;
 }
-
-const EARLY_PAGE_ACCESS_KEY = 'adminEarlyPageAccess';
-
-function isEarlyPageAccessEnabled() {
-    return Storage.isAdminLoggedIn() && sessionStorage.getItem(EARLY_PAGE_ACCESS_KEY) === '1';
-}
-
-function setEarlyPageAccess(enabled) {
-    if (enabled) {
-        sessionStorage.setItem(EARLY_PAGE_ACCESS_KEY, '1');
-    } else {
-        sessionStorage.removeItem(EARLY_PAGE_ACCESS_KEY);
-    }
-}
-
-function isGuessPageLocked() {
-    return isBeforeGuessTime() && !isEarlyPageAccessEnabled();
-}
-
-function isMiddayPageLocked() {
-    return isBeforeMidday() && !isEarlyPageAccessEnabled();
-}
-
-async function canViewRevealedResults(weekStr) {
-    if (isEarlyPageAccessEnabled()) return true;
-    return isWeekResultsRevealed(weekStr);
-}
-
 /** Midday on the Friday that identifies a game week (weekStr is DD/MM/YYYY). */
 function getWeekFridayMidday(weekStr) {
     const [d, m, y] = weekStr.split('/').map(Number);
@@ -449,7 +421,7 @@ async function updateNavigationVisibility() {
 
     const guessBtn = document.querySelector('.nav-btn[data-page="guess"]');
     if (guessBtn) {
-        if (isGuessPageLocked()) {
+        if (isBeforeGuessTime()) {
             guessBtn.disabled = true;
             guessBtn.title = 'Available from 10:30';
         } else {
@@ -460,7 +432,7 @@ async function updateNavigationVisibility() {
 
     const resultsBtn = document.querySelector('.nav-btn[data-page="results"]');
     if (resultsBtn) {
-        if (isMiddayPageLocked()) {
+        if (isBeforeMidday()) {
             resultsBtn.disabled = true;
             resultsBtn.title = 'Available from midday';
         } else {
@@ -471,7 +443,7 @@ async function updateNavigationVisibility() {
 
     const statsBtn = document.querySelector('.nav-btn[data-page="stats"]');
     if (statsBtn) {
-        if (isMiddayPageLocked()) {
+        if (isBeforeMidday()) {
             statsBtn.disabled = true;
             statsBtn.title = 'Available from midday';
         } else {
@@ -495,13 +467,13 @@ function setupNavigation() {
 async function navigateToPage(page) {
     await updateNavigationVisibility();
 
-    if (page === 'guess' && isGuessPageLocked()) {
+    if (page === 'guess' && isBeforeGuessTime()) {
         return; // Guess button is disabled, but guard in case of hash/navigation
     }
-    if (page === 'results' && isMiddayPageLocked()) {
+    if (page === 'results' && isBeforeMidday()) {
         return; // Results button is disabled, but guard in case of hash/navigation
     }
-    if (page === 'stats' && isMiddayPageLocked()) {
+    if (page === 'stats' && isBeforeMidday()) {
         return;
     }
     currentPage = page;
@@ -537,7 +509,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'guess':
-                if (isGuessPageLocked()) {
+                if (isBeforeGuessTime()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Guess</h2>
@@ -552,7 +524,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'results':
-                if (isMiddayPageLocked()) {
+                if (isBeforeMidday()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Results</h2>
@@ -567,7 +539,7 @@ async function renderPage(page) {
                 }
                 break;
             case 'stats':
-                if (isMiddayPageLocked()) {
+                if (isBeforeMidday()) {
                     mainContent.innerHTML = `
                         <div class="page active">
                             <h2 class="page-title">Stats</h2>
@@ -1269,7 +1241,7 @@ async function renderResultsContent(week) {
     
     if (!content) return;
 
-    if (!(await canViewRevealedResults(week))) {
+    if (!(await isWeekResultsRevealed(week))) {
         content.innerHTML = `<div class="empty-state">${await renderResultsWaitingMessage(week)}</div>`;
         return;
     }
@@ -1397,7 +1369,7 @@ async function renderStatsPage() {
     const allWeeks = await Storage.getAllWeeks();
     const weeks = [];
     for (const w of allWeeks) {
-        if (await canViewRevealedResults(w)) {
+        if (await isWeekResultsRevealed(w)) {
             weeks.push(w);
         }
     }
@@ -1813,7 +1785,6 @@ async function setupAdminPage() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
             Storage.setAdminLoggedIn(false);
-            setEarlyPageAccess(false);
             await updateNavigationVisibility();
             // If on settings page, redirect to admin
             if (currentPage === 'settings') {
@@ -2022,29 +1993,10 @@ function renderSettingsPage() {
     const gistId = Storage.getGistId();
     const hasToken = !!Storage.getGitHubToken();
     const currentUrl = window.location.origin + window.location.pathname;
-    const earlyAccess = isEarlyPageAccessEnabled();
 
     return `
         <div class="page active">
             <h2 class="page-title">Settings</h2>
-
-            <div class="admin-section">
-                <h2>Early access</h2>
-                <p style="color: #666666; margin-bottom: 15px;">
-                    Guess opens at 10:30. Results and Stats open at midday, and this week’s scores stay hidden until the Friday reveal.
-                    Turn this on to open those pages on this browser. Everyone else still follows the normal schedule.
-                    It stays on until you turn it off, log out, or close this tab.
-                </p>
-                <p style="margin-bottom: 15px;">
-                    Status: ${earlyAccess
-                        ? '<strong>On</strong> — Guess, Results, and Stats are open on this browser.'
-                        : '<strong>Off</strong> — pages follow the normal schedule.'}
-                </p>
-                <button class="btn ${earlyAccess ? 'btn-secondary' : ''}" id="toggle-early-access-btn" ${earlyAccess ? '' : 'style="background: #00a8cc;"'}>
-                    ${earlyAccess ? 'Turn off early access' : 'Enable early access'}
-                </button>
-                <div id="early-access-message" style="margin-top: 10px;"></div>
-            </div>
             
             ${isConfigured ? `
                 <div class="alert alert-success" style="margin-bottom: 30px;">
@@ -2133,19 +2085,6 @@ function renderSettingsPage() {
 }
 
 function setupSettingsPage() {
-    const earlyAccessBtn = document.getElementById('toggle-early-access-btn');
-    if (earlyAccessBtn) {
-        earlyAccessBtn.addEventListener('click', async () => {
-            const turningOn = !isEarlyPageAccessEnabled();
-            if (turningOn && !confirm('Open Guess, Results, and Stats on this browser? Other players will still see the normal schedule.')) {
-                return;
-            }
-            setEarlyPageAccess(turningOn);
-            await updateNavigationVisibility();
-            await renderPage('settings');
-        });
-    }
-
     // Copy URL button
     const copyUrlBtn = document.getElementById('copy-url-btn');
     if (copyUrlBtn) {
