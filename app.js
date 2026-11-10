@@ -354,6 +354,86 @@ async function fetchSpotifyOEmbedThumbnail(albumPageUrl) {
     return data.thumbnail_url || null;
 }
 
+/** Fallback album art when Spotify oEmbed fails (e.g. preview / CORS). */
+async function fetchItunesAlbumArtwork(artist, album) {
+    const term = encodeURIComponent(`${artist} ${album}`.trim());
+    const res = await fetch(`https://itunes.apple.com/search?term=${term}&entity=album&limit=1`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const url = data.results?.[0]?.artworkUrl100;
+    return url ? url.replace('100x100bb', '600x600bb') : null;
+}
+
+function getCrystalMazeBodyHtml(windowId) {
+    switch (windowId) {
+        case 'midday':
+            return '<p>Results unlock at <strong>midday</strong> once everyone has finalized their guesses. Still time to lock in your answers in the maze!</p>';
+        case 'fourPmPending':
+            return '<p>Someone is still guessing — results will show at <strong>4pm</strong> if guesses are still outstanding. Save &amp; finalize yours before then!</p>';
+        case 'fourPmGeneric':
+            return '<p>After <strong>midday</strong>, results may be live. If anyone is still guessing, the rest of the team might be waiting until <strong>4pm</strong> — don&apos;t be the straggler: finalize!</p>';
+        case 'after4pm':
+            return '<p>It&apos;s past <strong>4pm</strong> on results Friday. If you haven&apos;t finalized your guesses, you&apos;ll be scored <strong>0</strong> for this week (see the rules).</p>';
+        default:
+            return '';
+    }
+}
+
+/** Admin / preview: show Crystal Maze popup without Friday timing or localStorage guard. */
+async function previewCrystalMazePopup(windowId) {
+    const bodyHtml = getCrystalMazeBodyHtml(windowId);
+    if (!bodyHtml) return;
+    await openConfirmModal({
+        title: 'The Crystal Maze',
+        image: RICHARD_OBRIEN_IMAGE,
+        bodyHtml,
+        confirmLabel: 'OK',
+        cancelLabel: 'Close'
+    });
+}
+
+async function fillAdminCatchphraseArtPreview(gridEl) {
+    const subs = await Storage.getSubmissions(Storage.getCurrentWeek());
+    if (!gridEl) return;
+    if (subs.length === 0) {
+        gridEl.innerHTML = '<p class="preview-art-empty">No submissions for this week. Enable preview and seed mock albums first.</p>';
+        return;
+    }
+    gridEl.innerHTML = '<p class="preview-art-loading">Loading artwork…</p>';
+    const figures = [];
+    for (const sub of subs) {
+        const albumClean = String(sub.album || '').replace(/\s*\([^)]*\)\s*$/, '').trim() || sub.album;
+        let thumb = null;
+        let source = '';
+        if (sub.url && extractSpotifyAlbumId(sub.url)) {
+            try {
+                thumb = await fetchSpotifyOEmbedThumbnail(sub.url.trim());
+                if (thumb) source = 'Spotify';
+            } catch { /* ignore */ }
+        }
+        if (!thumb && sub.artist && albumClean) {
+            try {
+                thumb = await fetchItunesAlbumArtwork(sub.artist, albumClean);
+                if (thumb) source = 'iTunes (fallback)';
+            } catch { /* ignore */ }
+        }
+        const imgBlock = thumb
+            ? `<img src="${escapeAttr(thumb)}" alt="" loading="lazy">`
+            : '<div class="preview-catchphrase-art-missing">No art</div>';
+        figures.push(`
+            <figure class="preview-catchphrase-art-item">
+                ${imgBlock}
+                <figcaption>
+                    <strong>${escapeHtml(sub.album)}</strong><br>
+                    ${escapeHtml(sub.artist)} · ${escapeHtml(sub.submitter)}
+                    ${source ? `<br><small>${escapeHtml(source)}</small>` : ''}
+                </figcaption>
+            </figure>
+        `);
+    }
+    gridEl.innerHTML = `<div class="preview-catchphrase-art-grid">${figures.join('')}</div>`;
+}
+
 function prefersReducedMotion() {
     return typeof window !== 'undefined' && window.matchMedia
         && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -374,26 +454,19 @@ async function maybeShowCrystalMazeDeadlinePopup(week) {
     const now = new Date();
     const tMin = now.getHours() * 60 + now.getMinutes();
     let windowId = null;
-    let bodyHtml = '';
 
     if (tMin >= 10 * 60 && tMin < 12 * 60) {
         windowId = 'midday';
-        bodyHtml = '<p>Results unlock at <strong>midday</strong> once everyone has finalized their guesses. Still time to lock in your answers in the maze!</p>';
     } else if (tMin >= 12 * 60 && tMin < 16 * 60) {
         const pending = await getPendingGuessers(week);
-        if (pending.length > 0) {
-            windowId = 'fourPmPending';
-            bodyHtml = '<p>Someone is still guessing — results will show at <strong>4pm</strong> if guesses are still outstanding. Save &amp; finalize yours before then!</p>';
-        } else {
-            windowId = 'fourPmGeneric';
-            bodyHtml = '<p>After <strong>midday</strong>, results may be live. If anyone is still guessing, the rest of the team might be waiting until <strong>4pm</strong> — don&apos;t be the straggler: finalize!</p>';
-        }
+        windowId = pending.length > 0 ? 'fourPmPending' : 'fourPmGeneric';
     } else if (tMin >= 16 * 60) {
         windowId = 'after4pm';
-        bodyHtml = '<p>It&apos;s past <strong>4pm</strong> on results Friday. If you haven&apos;t finalized your guesses, you&apos;ll be scored <strong>0</strong> for this week (see the rules).</p>';
     }
 
     if (!windowId) return;
+
+    const bodyHtml = getCrystalMazeBodyHtml(windowId);
 
     const key = `crystalMazeWarn_${week}_${windowId}`;
     if (localStorage.getItem(key)) return;
@@ -415,14 +488,24 @@ async function hydrateCatchphraseAlbumArt(root = document) {
     for (const cell of cells) {
         const url = cell.getAttribute('data-spotify-url');
         if (!url) continue;
-        let thumb = cache.get(url);
+        const artist = cell.getAttribute('data-artist') || '';
+        const album = cell.getAttribute('data-album') || '';
+        const cacheKey = url || `${artist}|${album}`;
+        let thumb = cache.get(cacheKey);
         if (thumb === undefined) {
             try {
-                thumb = await fetchSpotifyOEmbedThumbnail(url);
+                thumb = url ? await fetchSpotifyOEmbedThumbnail(url) : null;
             } catch {
                 thumb = null;
             }
-            cache.set(url, thumb);
+            if (!thumb && artist && album) {
+                try {
+                    thumb = await fetchItunesAlbumArtwork(artist, album);
+                } catch {
+                    thumb = null;
+                }
+            }
+            cache.set(cacheKey, thumb);
         }
         const img = cell.querySelector('.catchphrase-album-thumb');
         const ph = cell.querySelector('.catchphrase-art-placeholder');
@@ -1342,8 +1425,8 @@ async function renderGuessPage() {
                 const spotifyUrlAttr = spotifyUrl ? escapeAttr(spotifyUrl) : '';
                 return `
                     <div class="album-card" data-album-key="${albumGroup.key}">
-                        ${spotifyUrl ? `
-                        <div class="catchphrase-art-cell" data-spotify-url="${spotifyUrlAttr}">
+                        ${`
+                        <div class="catchphrase-art-cell" data-spotify-url="${spotifyUrlAttr}" data-artist="${escapeAttr(albumGroup.artist)}" data-album="${escapeAttr(albumGroup.album)}">
                             <div class="catchphrase-panel">
                                 <div class="catchphrase-art-wrap">
                                     <span class="catchphrase-art-placeholder" aria-hidden="true">…</span>
@@ -1357,9 +1440,7 @@ async function renderGuessPage() {
                             </div>
                             <img src="${ROY_WALKER_IMAGE}" alt="Roy Walker" class="catchphrase-roy-host" width="72" height="72">
                         </div>
-                        ` : ''}
-                        ${spotifyUrl ? '' : `<h3>${albumTitleEsc}</h3>
-                        <p><strong>Artist:</strong> ${albumArtistEsc}</p>`}
+                        `}
                         <div class="guess-form">
                             <div class="guess-form-lifeline-row">
                                 <div class="guess-options" 
@@ -2616,6 +2697,28 @@ async function renderAdminPage() {
                     <button type="button" class="btn" id="preview-reset-lifelines-btn" style="background: #5c4d7d;" ${!previewOn ? 'disabled' : ''}>
                         Reset lifelines (preview)
                     </button>
+                    <button type="button" class="btn btn-secondary" id="preview-reseed-btn" ${!previewOn ? 'disabled' : ''}>
+                        Re-seed mock albums
+                    </button>
+                </div>
+                <div class="admin-preview-gameshow-tester">
+                    <h3 style="margin: 20px 0 10px; font-size: 1.05rem;">Preview Crystal Maze &amp; Catchphrase</h3>
+                    <p style="color: #666666; margin-bottom: 12px; font-size: 0.9rem;">
+                        Try Richard&apos;s deadline popups any time (no Friday clock). Load album artwork the same way as on the Guess page (Spotify oEmbed, then iTunes fallback).
+                    </p>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;">
+                        <label for="preview-crystal-window" class="sr-only">Crystal Maze message</label>
+                        <select id="preview-crystal-window" class="admin-preview-select">
+                            <option value="midday">Midday warning</option>
+                            <option value="fourPmPending">4pm (still guessing)</option>
+                            <option value="fourPmGeneric">4pm (straggler nudge)</option>
+                            <option value="after4pm">After 4pm forfeit</option>
+                        </select>
+                        <button type="button" class="btn" id="preview-crystal-btn">Show Crystal Maze popup</button>
+                        <button type="button" class="btn btn-secondary" id="preview-guess-catchphrase-btn" ${!previewOn ? 'disabled' : ''}>Open Guess (Catchphrase)</button>
+                        <button type="button" class="btn btn-secondary" id="preview-catchphrase-refresh-btn" ${!previewOn ? 'disabled' : ''}>Load artwork preview</button>
+                    </div>
+                    <div id="preview-catchphrase-art-preview" class="preview-catchphrase-art-preview-host"></div>
                 </div>
                 <p style="color: #666666; margin-top: 12px; font-size: 0.9rem;">
                     After enabling, open <strong>Guess</strong>, pick your name from the team list, and use the Chris / Noel flows. Results and Stats unlock immediately in preview so you can check layouts.
@@ -2806,6 +2909,57 @@ async function setupAdminPage() {
                 await renderPage(currentPage);
             }, 400);
         });
+    }
+
+    const previewReseedBtn = document.getElementById('preview-reseed-btn');
+    if (previewReseedBtn) {
+        previewReseedBtn.addEventListener('click', async () => {
+            previewReseedBtn.disabled = true;
+            try {
+                const result = await Storage.seedPreviewWeekMockSubmissions();
+                if (!result.success) {
+                    showMessage('preview-mode-message', result.message || 'Could not re-seed.', 'error');
+                    return;
+                }
+                showMessage('preview-mode-message', result.message || 'Mock albums re-seeded.', 'success');
+                const artHost = document.getElementById('preview-catchphrase-art-preview');
+                if (artHost) await fillAdminCatchphraseArtPreview(artHost);
+            } finally {
+                previewReseedBtn.disabled = false;
+            }
+        });
+    }
+
+    const previewCrystalBtn = document.getElementById('preview-crystal-btn');
+    if (previewCrystalBtn) {
+        previewCrystalBtn.addEventListener('click', async () => {
+            const sel = document.getElementById('preview-crystal-window');
+            const windowId = sel?.value || 'midday';
+            await previewCrystalMazePopup(windowId);
+        });
+    }
+
+    const previewGuessCatchphraseBtn = document.getElementById('preview-guess-catchphrase-btn');
+    if (previewGuessCatchphraseBtn) {
+        previewGuessCatchphraseBtn.addEventListener('click', async () => {
+            await navigateToPage('guess');
+        });
+    }
+
+    const previewCatchphraseRefreshBtn = document.getElementById('preview-catchphrase-refresh-btn');
+    const previewCatchphraseArtHost = document.getElementById('preview-catchphrase-art-preview');
+    if (previewCatchphraseRefreshBtn && previewCatchphraseArtHost) {
+        previewCatchphraseRefreshBtn.addEventListener('click', async () => {
+            previewCatchphraseRefreshBtn.disabled = true;
+            try {
+                await fillAdminCatchphraseArtPreview(previewCatchphraseArtHost);
+            } finally {
+                previewCatchphraseRefreshBtn.disabled = false;
+            }
+        });
+        if (Storage.isPreviewMode() && previewCatchphraseArtHost) {
+            fillAdminCatchphraseArtPreview(previewCatchphraseArtHost).catch(() => {});
+        }
     }
 
     const addMemberForm = document.getElementById('add-member-form');

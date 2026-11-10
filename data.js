@@ -88,18 +88,27 @@ const Storage = {
         if (members.length < 2) {
             return { success: false, message: 'Add at least two team members before seeding preview data.' };
         }
-        /** Real Spotify album pages so Catchphrase oEmbed artwork works in preview */
-        const previewSpotifyAlbumUrls = [
-            'https://open.spotify.com/album/4LH4d3eNESJKdas12IVkcA',
-            'https://open.spotify.com/album/2wid97MelJBod49liTZsGQ',
-            'https://open.spotify.com/album/1N2lB8qE6HryYzeRbpLS9R',
-            'https://open.spotify.com/album/3mH6qwIyYcrYjIsMyuVpFf'
-        ];
         const albums = [
-            { artist: 'Preview Artist A', album: 'First Album', url: previewSpotifyAlbumUrls[0] },
-            { artist: 'Preview Artist B', album: 'Second Album', url: previewSpotifyAlbumUrls[1] },
-            { artist: 'Preview Artist C', album: 'Third Album', url: previewSpotifyAlbumUrls[2] },
-            { artist: 'Preview Artist D', album: 'Fourth Album', url: previewSpotifyAlbumUrls[3] }
+            {
+                artist: 'Pink Floyd',
+                album: 'The Dark Side of the Moon',
+                url: 'https://open.spotify.com/album/4LH4d3eTuMXviHvrmDufwL'
+            },
+            {
+                artist: 'Fleetwood Mac',
+                album: 'Rumours',
+                url: 'https://open.spotify.com/album/1WNf769gz8AOST3siLj0AC'
+            },
+            {
+                artist: 'Radiohead',
+                album: 'OK Computer',
+                url: 'https://open.spotify.com/album/382ObEPsp2rxGrns7N7fVj'
+            },
+            {
+                artist: 'The Beatles',
+                album: 'Abbey Road',
+                url: 'https://open.spotify.com/album/0ETFjACtuP2ADd6ieM9l16'
+            }
         ];
         const submissions = [];
         let t = Date.now();
@@ -108,7 +117,7 @@ const Storage = {
             submissions.push({
                 id: t++,
                 artist: a.artist,
-                album: `${a.album} (${submitter})`,
+                album: a.album,
                 url: a.url,
                 submitter,
                 week

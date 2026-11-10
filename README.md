@@ -92,3 +92,5 @@ If you prefer individual setup:
 ## Admin: preview mode (local testing)
 
 Log in to **Admin** and use **Preview mode** to seed mock albums for the current week and try lifelines, Deal or No Deal, and results **without writing guesses to the shared Gist**. Mock data is merged in your browser only (overlay in `localStorage`). Use **Reset lifelines (preview)** to clear lifeline usage for the current week and try them again. Turn preview off when finished. While preview is on, clearing submissions/guesses for the week from Admin is blocked so you don’t wipe real data by mistake.
+
+In **Preview Crystal Maze & Catchphrase** (Admin, while preview is on): use **Show Crystal Maze popup** to try Richard’s deadline messages without waiting for Friday; **Load artwork preview** / **Re-seed mock albums** to refresh Catchphrase panels (Spotify oEmbed, with iTunes fallback). **Open Guess (Catchphrase)** jumps to the live Guess layout.
