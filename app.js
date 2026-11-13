@@ -31,7 +31,6 @@ const JIM_BOWEN_IMAGE = 'images/jim-bowen/4319.jpg';
 const MR_BLOBBY_IMAGE = 'images/mr-blobby/SEI_229300029-e519.webp';
 const RICHARD_OBRIEN_IMAGE = 'images/richard-obrien/MAIN-Richard-OBrien.avif';
 const ROY_WALKER_IMAGE = 'images/roy-walker/catchphrase-tv---roy-walker-440nw-814149as.jpg';
-const LES_DENNIS_IMAGE = 'images/les-dennis/4_Family-Fortunes.avif';
 
 const LETTER_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -384,7 +383,6 @@ async function previewCrystalMazePopup(windowId) {
     const bodyHtml = getCrystalMazeBodyHtml(windowId);
     if (!bodyHtml) return;
     await openConfirmModal({
-        title: 'The Crystal Maze',
         image: RICHARD_OBRIEN_IMAGE,
         bodyHtml,
         confirmLabel: 'OK',
@@ -434,15 +432,6 @@ async function fillAdminCatchphraseArtPreview(gridEl) {
     gridEl.innerHTML = `<div class="preview-catchphrase-art-grid">${figures.join('')}</div>`;
 }
 
-function prefersReducedMotion() {
-    return typeof window !== 'undefined' && window.matchMedia
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 /** Crystal Maze: one-off Friday deadline reminders on the Guess page (preview mode skipped). */
 async function maybeShowCrystalMazeDeadlinePopup(week) {
     if (Storage.isPreviewMode()) return;
@@ -472,7 +461,6 @@ async function maybeShowCrystalMazeDeadlinePopup(week) {
     if (localStorage.getItem(key)) return;
 
     await openConfirmModal({
-        title: 'The Crystal Maze',
         image: RICHARD_OBRIEN_IMAGE,
         bodyHtml,
         confirmLabel: 'OK',
@@ -520,69 +508,6 @@ async function hydrateCatchphraseAlbumArt(root = document) {
         }
         if (roy) roy.hidden = false;
     }
-}
-
-function revealFortunesItemInstant(item) {
-    item.classList.add('result-item--revealed');
-    const contentEl = item.querySelector('.fortunes-card-content');
-    if (contentEl) contentEl.removeAttribute('inert');
-    const board = item.querySelector('.fortunes-card-board');
-    if (board) board.hidden = true;
-    item.querySelectorAll('.result-reveal-line').forEach(el => { el.hidden = false; });
-    const hasGuesses = item.getAttribute('data-has-guesses') === 'true';
-    const allCorrect = item.getAttribute('data-all-correct') === 'true';
-    item.classList.remove('result-item--pending');
-    if (hasGuesses) {
-        item.classList.add(allCorrect ? 'correct' : 'incorrect');
-    }
-}
-
-async function runFortunesItemSteps(item, stepMs) {
-    const contentEl = item.querySelector('.fortunes-card-content');
-    const board = item.querySelector('.fortunes-card-board');
-    try {
-        item.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
-    } catch {
-        item.scrollIntoView(true);
-    }
-    await sleep(prefersReducedMotion() ? 0 : 400);
-    if (board) {
-        board.classList.add('fortunes-card-board--lifting');
-        await sleep(prefersReducedMotion() ? 0 : 420);
-        board.hidden = true;
-    }
-    if (contentEl) contentEl.removeAttribute('inert');
-    item.classList.add('result-item--revealed');
-    const lines = item.querySelectorAll('.result-reveal-line');
-    for (let i = 0; i < lines.length; i++) {
-        lines[i].hidden = false;
-        if (i < lines.length - 1) await sleep(stepMs);
-    }
-    const hasGuesses = item.getAttribute('data-has-guesses') === 'true';
-    const allCorrect = item.getAttribute('data-all-correct') === 'true';
-    item.classList.remove('result-item--pending');
-    if (hasGuesses) {
-        item.classList.add(allCorrect ? 'correct' : 'incorrect');
-    }
-}
-
-function initFortunesResultsReveal(container) {
-    const items = [...container.querySelectorAll('.result-item[data-fortunes-index]')];
-    if (items.length === 0) return;
-
-    if (prefersReducedMotion()) {
-        items.forEach(revealFortunesItemInstant);
-        return;
-    }
-
-    const stepMs = 700;
-    let chain = Promise.resolve();
-    items.forEach((item, idx) => {
-        chain = chain.then(() => runFortunesItemSteps(item, stepMs));
-        if (idx < items.length - 1) {
-            chain = chain.then(() => sleep(350));
-        }
-    });
 }
 
 async function getPendingGuessers(week) {
@@ -699,7 +624,7 @@ function openConfirmModal(opts) {
         backdrop.innerHTML = `
             <div class="gameshow-modal-card" role="dialog" aria-modal="true">
                 ${opts.image ? `<img src="${opts.image}" alt="" class="gameshow-host-img">` : ''}
-                <h3 class="gameshow-modal-title">${opts.title}</h3>
+                ${opts.title ? `<h3 class="gameshow-modal-title">${escapeHtml(opts.title)}</h3>` : ''}
                 <div class="gameshow-modal-body">${opts.bodyHtml}</div>
                 <div class="gameshow-modal-actions">
                     <button type="button" class="btn btn-success" id="gameshow-modal-confirm">${escapeHtml(opts.confirmLabel || 'Confirm')}</button>
@@ -2146,12 +2071,10 @@ async function renderResultsContent(week) {
         }
     });
 
-    // Show grouped albums (Family Fortunes–style staggered reveal; see initFortunesResultsReveal)
+    // Show grouped albums
     let correctCount = 0;
     let guessedCount = 0;
-    const albumsList = Object.values(albumGroups);
-    const fortTotal = albumsList.length;
-    const submissionsHtml = albumsList.map((albumGroup, fortIdx) => {
+    const submissionsHtml = Object.values(albumGroups).map(albumGroup => {
         const actualSubmitters = [...new Set(albumGroup.actualSubmitters)];
         const guessedSubmitters = [...new Set(guessesByAlbum[albumGroup.key] || [])];
         const correctGuesses = guessedSubmitters.filter(g => actualSubmitters.includes(g));
@@ -2172,34 +2095,14 @@ async function renderResultsContent(week) {
         const albumArtistEsc = escapeHtml(albumGroup.artist);
         const youLineInner = hasGuesses
             ? `<strong>You said:</strong> ${guessedSubmitters.map(s => escapeHtml(s)).join(', ')}`
-            : '<strong>You said:</strong> —';
-        const surveyLineInner = `<strong>Our survey said:</strong> ${actualSubmitters.map(s => escapeHtml(s)).join(', ')}`;
-
-        const roundLine = escapeHtml(`Round ${fortIdx + 1} of ${fortTotal}`);
+            : '';
 
         return `
-            <div class="result-item result-item--pending result-item--fortunes"
-                 data-fortunes-index="${fortIdx}"
-                 data-has-guesses="${hasGuesses ? 'true' : 'false'}"
-                 data-all-correct="${allCorrect ? 'true' : 'false'}">
-                <div class="fortunes-card-shell">
-                    <div class="fortunes-card-content" inert>
-                        <h4>${albumTitleEsc} — ${albumArtistEsc}</h4>
-                        <p class="result-reveal-line result-reveal-line--you" hidden>${youLineInner}</p>
-                        <p class="result-reveal-line result-reveal-line--survey" hidden>${surveyLineInner}</p>
-                        ${hasGuesses ? `<p class="result-reveal-line result-reveal-line--verdict" hidden><strong>Result:</strong> ${resultMessage}</p>` : ''}
-                    </div>
-                    <div class="fortunes-card-board" aria-hidden="true">
-                        <div class="fortunes-board-strip">
-                            <img src="${LES_DENNIS_IMAGE}" alt="" class="fortunes-board-les" width="48" height="48">
-                            <div class="fortunes-board-copy">
-                                <span class="fortunes-board-kicker">Our survey says…</span>
-                                <span class="fortunes-board-round">${roundLine}</span>
-                            </div>
-                        </div>
-                        <p class="fortunes-board-hint">The answer’s under the board — here it comes!</p>
-                    </div>
-                </div>
+            <div class="result-item ${hasGuesses ? (allCorrect ? 'correct' : 'incorrect') : ''}">
+                <h4>${albumTitleEsc} — ${albumArtistEsc}</h4>
+                ${youLineInner ? `<p>${youLineInner}</p>` : ''}
+                <p><strong>Submitted by:</strong> ${actualSubmitters.map(s => escapeHtml(s)).join(', ')}</p>
+                ${hasGuesses ? `<p><strong>Result:</strong> ${resultMessage}</p>` : ''}
             </div>
         `;
     }).join('');
@@ -2340,17 +2243,11 @@ async function renderResultsContent(week) {
         ${scoreHeader}
         ${cameoBullseye}
         ${cameoBlobby}
-        <div class="fortunes-reveal-wrap" aria-live="polite">
-            <div class="results-grid fortunes-results-grid">
+        <div class="results-grid">
             ${submissionsHtml}
-            </div>
         </div>
         ${leaderboardHtml}
     `;
-
-    const fortunesGrid = content.querySelector('.fortunes-results-grid');
-    if (fortunesGrid) initFortunesResultsReveal(fortunesGrid);
-    hydrateCatchphraseAlbumArt(content).catch(() => {});
 }
 
 // Stats Page

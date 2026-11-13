@@ -303,126 +303,6 @@ main {
     border-left: 4px solid var(--brand-blue);
 }
 
-.result-item--pending:not(.correct):not(.incorrect) {
-    border-left-color: var(--border-light);
-}
-
-/* Family Fortunes: board covers card until reveal */
-.result-item--fortunes .fortunes-card-shell {
-    position: relative;
-    min-height: 140px;
-}
-
-.result-item--fortunes .fortunes-card-content {
-    position: relative;
-    z-index: 0;
-}
-
-.result-item--fortunes.result-item--pending:not(.result-item--revealed) .fortunes-card-content {
-    filter: blur(8px);
-    opacity: 0.25;
-    pointer-events: none;
-    user-select: none;
-}
-
-.result-item--fortunes.result-item--revealed .fortunes-card-content {
-    filter: none;
-    opacity: 1;
-    pointer-events: auto;
-    user-select: auto;
-}
-
-.result-item--fortunes .fortunes-card-board {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 16px;
-    border-radius: 6px;
-    background: linear-gradient(160deg, #1a237e 0%, #283593 40%, #3949ab 100%);
-    color: #fff;
-    text-align: center;
-    box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.12), 0 4px 14px rgba(0, 0, 0, 0.2);
-}
-
-.result-item--fortunes .fortunes-board-strip {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    border: 2px solid rgba(255, 235, 59, 0.45);
-}
-
-.result-item--fortunes .fortunes-board-les {
-    width: 48px;
-    height: 48px;
-    object-fit: cover;
-    border-radius: 8px;
-    border: 2px solid rgba(255, 255, 255, 0.35);
-    flex-shrink: 0;
-}
-
-.result-item--fortunes .fortunes-board-copy {
-    text-align: left;
-}
-
-.result-item--fortunes .fortunes-board-kicker {
-    display: block;
-    font-weight: 800;
-    font-size: 1rem;
-    letter-spacing: 0.02em;
-}
-
-.result-item--fortunes .fortunes-board-round {
-    display: block;
-    font-size: 0.85rem;
-    opacity: 0.9;
-    margin-top: 2px;
-}
-
-.result-item--fortunes .fortunes-board-hint {
-    margin: 0;
-    font-size: 0.88rem;
-    opacity: 0.9;
-    max-width: 280px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .fortunes-card-board--lifting {
-        animation: none !important;
-        opacity: 0 !important;
-        visibility: hidden !important;
-    }
-}
-
-.fortunes-card-board--lifting {
-    animation: fortunesBoardLift 0.45s ease-in forwards;
-}
-
-@keyframes fortunesBoardLift {
-    0% {
-        transform: translateY(0) scale(1);
-        opacity: 1;
-    }
-    100% {
-        transform: translateY(-18%) scale(0.94);
-        opacity: 0;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .result-item--pending,
-    .result-reveal-line {
-        transition: none !important;
-    }
-}
-
 .result-item.correct {
     border-left-color: var(--brand-blue);
 }
@@ -441,11 +321,6 @@ main {
     margin-bottom: 6px;
     color: var(--text-primary);
     opacity: 0.9;
-}
-
-/* Family Fortunes–style results reveal */
-.fortunes-reveal-wrap {
-    margin-top: 8px;
 }
 
 /* Catchphrase panel + Spotify oEmbed artwork (guess page) */
