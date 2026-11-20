@@ -291,8 +291,34 @@ const Storage = {
 
     /** 4pm on the Friday identified by weekStr (DD/MM/YYYY). */
     getWeekFriday4pm(weekStr) {
-        const [d, m, y] = weekStr.split('/').map(Number);
+        return this.get4pmOnDayKey(weekStr);
+    },
+
+    getMiddayOnDayKey(dayKey) {
+        const [d, m, y] = dayKey.split('/').map(Number);
+        return new Date(y, m - 1, d, 12, 0, 0, 0);
+    },
+
+    get4pmOnDayKey(dayKey) {
+        const [d, m, y] = dayKey.split('/').map(Number);
         return new Date(y, m - 1, d, 16, 0, 0, 0);
+    },
+
+    async getResultsDayKey(week = null) {
+        const weekKey = week || this.getCurrentWeek();
+        const data = await this.getData();
+        return data.gameDayOverrides?.[weekKey] || weekKey;
+    },
+
+    getNextWeekKey(weekKey = null) {
+        const key = weekKey || this.getCurrentWeek();
+        const [d, m, y] = key.split('/').map(Number);
+        const date = new Date(y, m - 1, d);
+        date.setDate(date.getDate() + 7);
+        const dayStr = String(date.getDate()).padStart(2, '0');
+        const monthStr = String(date.getMonth() + 1).padStart(2, '0');
+        const yearStr = date.getFullYear();
+        return `${dayStr}/${monthStr}/${yearStr}`;
     },
 
     // Initialize data structure
@@ -1129,7 +1155,8 @@ const Storage = {
         // After 4pm Friday: submitters who never finalized get 0 points (counted as missed every album)
         const albumCount = Object.keys(albumGroups).length;
         const finalizedList = data.finalizedGuesses?.[weekKey] || [];
-        const deadlinePassed = albumCount > 0 && new Date() >= this.getWeekFriday4pm(weekKey);
+        const resultsDay = await this.getResultsDayKey(weekKey);
+        const deadlinePassed = albumCount > 0 && new Date() >= this.get4pmOnDayKey(resultsDay);
         if (deadlinePassed && !this.isPreviewMode()) {
             const submitterSet = new Set(submissions.map(s => s.submitter));
             members.forEach(member => {

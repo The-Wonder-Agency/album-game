@@ -18,6 +18,39 @@ const HARRY_HILL_IMAGES = [
 ];
 
 const GAME_SHOW_TITLE = 'Who Wants To Be An Album Game Millionaire? (Previously The All New All-New Album Game (AI Super Deluxe Edition))';
+const CHRISTMAS_GAME_TITLE = "It's Beginning to Look A Lot Like The Album Game Christmas Edition";
+const NODDY_MAIN_IMAGE = 'images/noddy-holder/noddy-main.jpg';
+const NODDY_IMAGES = [
+    'images/noddy-holder/1863.jpg',
+    'images/noddy-holder/img.webp',
+    'images/noddy-holder/Noddy-Holder-009.jpg',
+    'images/noddy-holder/noddy-holder-slade-copenhagen-denmark-658589907.webp',
+    'images/noddy-holder/MV5BMGEwYTQ1YjYtOTQwMS00MmRhLThhMWItNGU1NmQ1OTYxOTU4XkEyXkFqcGc@._V1_FMjpg_UX600_.jpg'
+];
+
+function isChristmasWeek(weekKey = Storage.getCurrentWeek()) {
+    return ThemeGenerator.isChristmasWeekKey(weekKey);
+}
+
+function applyChristmasSeasonTheme() {
+    document.body.classList.add('christmas-season');
+}
+
+function applyChristmasTitle() {
+    document.title = CHRISTMAS_GAME_TITLE;
+    const h1 = document.querySelector('header h1');
+    if (h1) h1.textContent = CHRISTMAS_GAME_TITLE;
+    applyChristmasSeasonTheme();
+}
+
+function maybeStartChristmasAmbient(weekKey = Storage.getCurrentWeek()) {
+    if (!isChristmasWeek(weekKey)) return;
+    const seenKey = `themePopupSeen_${weekKey}`;
+    if (localStorage.getItem(seenKey) && typeof Snow !== 'undefined') {
+        applyChristmasTitle();
+        Snow.start();
+    }
+}
 
 const CHRIS_IMAGE_5050 = 'images/chris-tarrant/842328698_18380646265239409_2468023915473924986_n.jpg';
 const CHRIS_IMAGE_AUDIENCE = 'images/chris-tarrant/843205650_18380646262239409_1717322556819931312_n.jpg';
@@ -175,6 +208,7 @@ async function initializeApp() {
         } else {
             currentWeekTheme = await Storage.getWeekTheme();
         }
+        maybeStartChristmasAmbient();
     } catch (error) {
         console.error('Error loading weekly theme:', error);
     }
@@ -305,28 +339,40 @@ function previewModeBanner() {
         </div>
     `;
 }
-/** Midday on the Friday that identifies a game week (weekStr is DD/MM/YYYY). */
-function getWeekFridayMidday(weekStr) {
-    const [d, m, y] = weekStr.split('/').map(Number);
-    return new Date(y, m - 1, d, 12, 0, 0, 0);
+function formatDayKeyWeekday(dayKey) {
+    const [d, m, y] = dayKey.split('/').map(Number);
+    const date = new Date(y, m - 1, d);
+    return date.toLocaleDateString(undefined, { weekday: 'long' });
 }
 
-function getWeekFriday4pm(weekStr) {
-    const [d, m, y] = weekStr.split('/').map(Number);
-    return new Date(y, m - 1, d, 16, 0, 0, 0);
+async function getResultsDayLabel(weekStr) {
+    const override = await Storage.getGameDayOverride(weekStr);
+    if (override) return formatDayKeyWeekday(override);
+    return 'Friday';
 }
 
-function isAfterMiddayOnWeekFriday(weekStr) {
-    return new Date() >= getWeekFridayMidday(weekStr);
+async function getWeekResultsMidday(weekStr) {
+    const dayKey = await Storage.getResultsDayKey(weekStr);
+    return Storage.getMiddayOnDayKey(dayKey);
 }
 
-function isAfter4pmOnWeekFriday(weekStr) {
-    return new Date() >= getWeekFriday4pm(weekStr);
+async function getWeekResults4pm(weekStr) {
+    const dayKey = await Storage.getResultsDayKey(weekStr);
+    return Storage.get4pmOnDayKey(dayKey);
 }
 
-/** True when `date` is the calendar day identified by weekStr (DD/MM/YYYY = that Friday). */
-function isDateSameAsWeekFriday(weekStr, date = new Date()) {
-    const [d, m, y] = weekStr.split('/').map(Number);
+async function isAfterMiddayOnResultsDay(weekStr) {
+    return new Date() >= await getWeekResultsMidday(weekStr);
+}
+
+async function isAfter4pmOnResultsDay(weekStr) {
+    return new Date() >= await getWeekResults4pm(weekStr);
+}
+
+/** True when `date` is the calendar results day for this week (Friday or game-day override). */
+async function isDateSameAsResultsDay(weekStr, date = new Date()) {
+    const dayKey = await Storage.getResultsDayKey(weekStr);
+    const [d, m, y] = dayKey.split('/').map(Number);
     return date.getDate() === d && date.getMonth() === m - 1 && date.getFullYear() === y;
 }
 
@@ -363,16 +409,16 @@ async function fetchItunesAlbumArtwork(artist, album) {
     return url ? url.replace('100x100bb', '600x600bb') : null;
 }
 
-function getCrystalMazeBodyHtml(windowId) {
+function getCrystalMazeBodyHtml(windowId, resultsDayLabel = 'Friday') {
     switch (windowId) {
         case 'midday':
             return '<p>Results unlock at <strong>midday</strong> once everyone has finalized their guesses. Still time to lock in your answers in the maze!</p>';
         case 'fourPmPending':
-            return '<p>Someone is still guessing — results will show at <strong>4pm</strong> if guesses are still outstanding. Save &amp; finalize yours before then!</p>';
+            return `<p>Someone is still guessing — results will show at <strong>4pm</strong> on ${escapeHtml(resultsDayLabel)} if guesses are still outstanding. Save &amp; finalize yours before then!</p>`;
         case 'fourPmGeneric':
-            return '<p>After <strong>midday</strong>, results may be live. If anyone is still guessing, the rest of the team might be waiting until <strong>4pm</strong> — don&apos;t be the straggler: finalize!</p>';
+            return `<p>After <strong>midday</strong>, results may be live. If anyone is still guessing, the rest of the team might be waiting until <strong>4pm</strong> on ${escapeHtml(resultsDayLabel)} — don&apos;t be the straggler: finalize!</p>`;
         case 'after4pm':
-            return '<p>It&apos;s past <strong>4pm</strong> on results Friday. If you haven&apos;t finalized your guesses, you&apos;ll be scored <strong>0</strong> for this week (see the rules).</p>';
+            return `<p>It&apos;s past <strong>4pm</strong> on ${escapeHtml(resultsDayLabel)}. If you haven&apos;t finalized your guesses, you&apos;ll be scored <strong>0</strong> for this week (see the rules).</p>`;
         default:
             return '';
     }
@@ -438,7 +484,7 @@ async function maybeShowCrystalMazeDeadlinePopup(week) {
     if (!currentGuesser) return;
     const finalized = await Storage.areGuessesFinalized(currentGuesser, week);
     if (finalized) return;
-    if (!isDateSameAsWeekFriday(week, new Date())) return;
+    if (!(await isDateSameAsResultsDay(week, new Date()))) return;
 
     const now = new Date();
     const tMin = now.getHours() * 60 + now.getMinutes();
@@ -455,7 +501,8 @@ async function maybeShowCrystalMazeDeadlinePopup(week) {
 
     if (!windowId) return;
 
-    const bodyHtml = getCrystalMazeBodyHtml(windowId);
+    const resultsDayLabel = await getResultsDayLabel(week);
+    const bodyHtml = getCrystalMazeBodyHtml(windowId, resultsDayLabel);
 
     const key = `crystalMazeWarn_${week}_${windowId}`;
     if (localStorage.getItem(key)) return;
@@ -528,15 +575,16 @@ async function isWeekResultsRevealed(weekStr) {
     const now = new Date();
 
     if (pending.length === 0) {
-        return now >= getWeekFridayMidday(weekStr);
+        return now >= await getWeekResultsMidday(weekStr);
     }
-    return now >= getWeekFriday4pm(weekStr);
+    return now >= await getWeekResults4pm(weekStr);
 }
 
 async function renderResultsWaitingMessage(week) {
     const pending = await getPendingGuessers(week);
-    const afterMiddayFriday = isAfterMiddayOnWeekFriday(week);
-    const after4pmFriday = isAfter4pmOnWeekFriday(week);
+    const afterMidday = await isAfterMiddayOnResultsDay(week);
+    const after4pm = await isAfter4pmOnResultsDay(week);
+    const resultsDayLabel = await getResultsDayLabel(week);
     const submissions = await Storage.getSubmissions(week);
 
     if (submissions.length === 0) {
@@ -547,15 +595,15 @@ async function renderResultsWaitingMessage(week) {
         ? `<p><strong>Still waiting on guesses from ${pending.length} ${pending.length === 1 ? 'person' : 'people'}:</strong> ${pending.map(p => escapeHtml(p)).join(', ')}.</p>`
         : '';
 
-    if (pending.length > 0 && afterMiddayFriday && !after4pmFriday) {
-        return `<p>Results will be revealed at 4pm on Friday if guesses are still outstanding.</p>${pendingLine}`;
+    if (pending.length > 0 && afterMidday && !after4pm) {
+        return `<p>Results will be revealed at 4pm on ${escapeHtml(resultsDayLabel)} if guesses are still outstanding.</p>${pendingLine}`;
     }
 
-    let html = '<p>Results will be revealed at midday on Friday once everyone has submitted their guesses, or at 4pm on Friday if anyone is still outstanding.</p>';
+    let html = `<p>Results will be revealed at midday on ${escapeHtml(resultsDayLabel)} once everyone has submitted their guesses, or at 4pm on ${escapeHtml(resultsDayLabel)} if anyone is still outstanding.</p>`;
     html += pendingLine;
-    if (!afterMiddayFriday && pending.length === 0) {
-        html += '<p>Check back after midday on Friday.</p>';
-    } else if (!afterMiddayFriday) {
+    if (!afterMidday && pending.length === 0) {
+        html += `<p>Check back after midday on ${escapeHtml(resultsDayLabel)}.</p>`;
+    } else if (!afterMidday) {
         html += '<p>If everyone has guessed by then, results will appear at midday; otherwise at 4pm.</p>';
     }
     return html;
@@ -563,9 +611,14 @@ async function renderResultsWaitingMessage(week) {
 
 function showThemePopupIfNeeded() {
     if (!currentWeekTheme) return;
-    if (document.getElementById('theme-modal-backdrop')) return;
+    if (document.getElementById('theme-modal-backdrop') || document.getElementById('christmas-intro-backdrop')) return;
 
     const week = Storage.getCurrentWeek();
+    if (isChristmasWeek(week)) {
+        showChristmasIntroIfNeeded({ week, theme: currentWeekTheme });
+        return;
+    }
+
     const seenKey = `themePopupSeen_${week}`;
     if (localStorage.getItem(seenKey)) return;
 
@@ -592,6 +645,96 @@ function showThemePopupIfNeeded() {
         localStorage.setItem(seenKey, 'true');
         backdrop.remove();
     });
+}
+
+function pickNoddyImage(seedKey) {
+    return seededShuffle(NODDY_IMAGES, String(seedKey))[0];
+}
+
+function showHarryThemePreviewModal(week, theme) {
+    if (document.getElementById('theme-modal-backdrop')) return;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'theme-modal-backdrop';
+    backdrop.id = 'theme-modal-backdrop';
+    backdrop.innerHTML = `
+        <div class="theme-modal-card" id="theme-modal-card">
+            <p class="theme-preview-week-label">Preview — week ${escapeHtml(week)}</p>
+            <img src="${HARRY_HILL_IMAGE}" alt="Harry Hill" class="theme-harry-hill theme-harry-hill--modal">
+            <h2>Theme of the Week</h2>
+            <p class="theme-modal-text">${escapeHtml(theme.text)}</p>
+            <button type="button" class="btn" id="theme-modal-dismiss">Close preview</button>
+        </div>
+    `;
+    document.body.appendChild(backdrop);
+    const card = document.getElementById('theme-modal-card');
+    const rect = card.getBoundingClientRect();
+    Confetti.burst(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    document.getElementById('theme-modal-dismiss').addEventListener('click', () => backdrop.remove());
+}
+
+function showChristmasThemeCard(week, theme) {
+    if (document.getElementById('theme-modal-backdrop')) return;
+
+    const noddySrc = pickNoddyImage(week);
+    const backdrop = document.createElement('div');
+    backdrop.className = 'theme-modal-backdrop';
+    backdrop.id = 'theme-modal-backdrop';
+    backdrop.innerHTML = `
+        <div class="theme-modal-card theme-modal-card--christmas" id="theme-modal-card">
+            <img src="${escapeAttr(noddySrc)}" alt="Noddy Holder" class="theme-noddy theme-noddy--modal">
+            <h2>Christmas Theme of the Week</h2>
+            <p class="theme-modal-text">${escapeHtml(theme.text)}</p>
+            <button type="button" class="btn" id="theme-modal-dismiss">Got it</button>
+        </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const seenKey = `themePopupSeen_${week}`;
+    document.getElementById('theme-modal-dismiss').addEventListener('click', () => {
+        localStorage.setItem(seenKey, 'true');
+        backdrop.remove();
+    });
+}
+
+function showChristmasIntroIfNeeded(opts = {}) {
+    const week = opts.week || Storage.getCurrentWeek();
+    const theme = opts.theme || currentWeekTheme;
+    if (!theme) return;
+    if (document.getElementById('christmas-intro-backdrop') || document.getElementById('theme-modal-backdrop')) return;
+
+    const seenKey = `themePopupSeen_${week}`;
+    if (!opts.force && localStorage.getItem(seenKey)) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'christmas-intro-backdrop';
+    backdrop.id = 'christmas-intro-backdrop';
+    backdrop.innerHTML = `
+        <div class="christmas-intro-stage">
+            <img src="${escapeAttr(NODDY_MAIN_IMAGE)}" alt="Noddy Holder" class="christmas-noddy-main" id="christmas-noddy-main">
+            <p class="christmas-shout" id="christmas-shout" hidden>It&apos;s Christmaaaas!!!!</p>
+        </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const mainImg = document.getElementById('christmas-noddy-main');
+    const shout = document.getElementById('christmas-shout');
+
+    setTimeout(() => {
+        mainImg.classList.add('christmas-noddy-main--visible');
+        applyChristmasTitle();
+        if (typeof Snow !== 'undefined') Snow.start();
+        shout.hidden = false;
+        shout.classList.add('christmas-shout--animate');
+    }, 2500);
+
+    setTimeout(() => {
+        backdrop.classList.add('christmas-intro-backdrop--fade');
+    }, 5500);
+
+    setTimeout(() => {
+        backdrop.remove();
+        showChristmasThemeCard(week, theme);
+    }, 6200);
 }
 
 function escapeHtml(text) {
@@ -769,6 +912,19 @@ function buildAudienceBarsHtml(names, weights) {
 
 function renderThemeBanner() {
     if (!currentWeekTheme) return '';
+    const week = Storage.getCurrentWeek();
+    if (isChristmasWeek(week)) {
+        const noddySrc = pickNoddyImage(week);
+        return `
+        <div class="theme-banner theme-banner--christmas">
+            <img src="${escapeAttr(noddySrc)}" alt="Noddy Holder" class="theme-noddy theme-noddy--banner">
+            <div class="theme-banner-content">
+                <div class="theme-banner-label">Christmas Theme of the Week</div>
+                <div class="theme-banner-text">${escapeHtml(currentWeekTheme.text)}</div>
+            </div>
+        </div>
+    `;
+    }
     return `
         <div class="theme-banner">
             <img src="${HARRY_HILL_IMAGE}" alt="Harry Hill" class="theme-harry-hill theme-harry-hill--banner">
@@ -833,6 +989,18 @@ function setupHarryHillPhotoExamples() {
 }
 
 function renderWeekThemeBanner(week, theme) {
+    if (isChristmasWeek(week) && theme?.text) {
+        const noddySrc = pickNoddyImage(week);
+        return `
+        <div class="theme-banner theme-banner--week theme-banner--christmas">
+            <img src="${escapeAttr(noddySrc)}" alt="Noddy Holder" class="theme-noddy theme-noddy--week">
+            <div class="theme-banner-content">
+                <div class="theme-banner-label">Christmas Theme of the Week</div>
+                <div class="theme-banner-text">${escapeHtml(theme.text)}</div>
+            </div>
+        </div>
+    `;
+    }
     const image = theme?.text ? pickHarryHillImage(week) : HARRY_HILL_NO_THEME_IMAGE;
     const label = theme?.text ? 'Theme of the Week' : '';
     const text = theme?.text ? escapeHtml(theme.text) : 'No theme recorded for this week.';
@@ -1282,6 +1450,9 @@ async function renderGuessPage() {
         ? Math.max(...duplicateAlbums.map(ag => ag.submissions.length))
         : 0;
 
+    const resultsDayLabel = await getResultsDayLabel(week);
+    const resultsDayLabelEsc = escapeHtml(resultsDayLabel);
+
     // Check if guesses are finalized
     const guessesFinalized = currentGuesser ? await Storage.areGuessesFinalized(currentGuesser) : false;
     const resultsRevealed = await isWeekResultsRevealed(week);
@@ -1309,12 +1480,12 @@ async function renderGuessPage() {
     });
 
     return `
-        <div class="page active" data-guesses-finalized="${guessesFinalized}">
+        <div class="page active" data-guesses-finalized="${guessesFinalized}" data-results-day-label="${escapeAttr(resultsDayLabel)}">
             ${previewModeBanner()}
             <h2 class="page-title">Guess Who Submitted What</h2>
             ${guessesFinalized ? `
                 <div class="alert alert-info" style="margin-bottom: 30px;">
-                    <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.${!resultsRevealed ? ' Results will be revealed at midday on Friday once everyone has guessed, or at 4pm if anyone is still outstanding.' : ''}</p>
+                    <p style="margin-bottom: 0;"><strong>Your guesses for this week have been finalized.</strong> You cannot make any changes.${!resultsRevealed ? ` Results will be revealed at midday on ${resultsDayLabelEsc} once everyone has guessed, or at 4pm if anyone is still outstanding.` : ''}</p>
                 </div>
             ` : ''}
             ${hasDuplicates ? `
@@ -1568,7 +1739,8 @@ function setupGuessPage() {
 
                 await updateNavigationVisibility();
                 await renderPage('guess');
-                showMessage('guess-message', 'Guesses saved and finalized! Results will be revealed at midday on Friday once everyone has guessed, or at 4pm if anyone is still outstanding.', 'success');
+                const resultsLabel = document.querySelector('.page.active[data-results-day-label]')?.getAttribute('data-results-day-label') || 'Friday';
+                showMessage('guess-message', `Guesses saved and finalized! Results will be revealed at midday on ${resultsLabel} once everyone has guessed, or at 4pm if anyone is still outstanding.`, 'success');
             } catch (error) {
                 console.error('Error saving guesses:', error);
                 showMessage('guess-message', 'Error saving guesses: ' + error.message, 'error');
@@ -2564,10 +2736,14 @@ async function renderAdminPage() {
     const submissions = await Storage.getSubmissions(currentWeek);
     const guesses = await Storage.getGuesses(currentWeek);
     const weekTheme = await Storage.getWeekTheme(currentWeek);
+    const nextWeek = Storage.getNextWeekKey(currentWeek);
+    const nextWeekTheme = await Storage.getWeekTheme(nextWeek);
     const isGameDay = await Storage.isGameDay(currentWeek);
     const gameDayOverride = await Storage.getGameDayOverride(currentWeek);
     const todayKey = Storage.getTodayKey();
     const isFriday = Storage.isFriday();
+    const christmasThisWeek = isChristmasWeek(currentWeek);
+    const christmasNextWeek = isChristmasWeek(nextWeek);
 
     return `
         <div class="page active">
@@ -2661,7 +2837,7 @@ async function renderAdminPage() {
                         : '<strong>Closed</strong> — submissions and theme appear on Friday'}
                 </p>
                 <p style="color: #666666; margin-bottom: 15px; font-size: 0.95rem;">
-                    Press the button below to let everyone submit albums and see the theme of the week today (for playing on a different day).
+                    Press the button below to run the <strong>full round today</strong> — submissions, theme, guesses, and results (midday / 4pm) use today&apos;s date instead of Friday.
                 </p>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                     <button class="btn" id="enable-game-day-btn" style="background: #00a8cc;" ${isFriday || (gameDayOverride === todayKey) ? 'disabled' : ''}>
@@ -2679,13 +2855,34 @@ async function renderAdminPage() {
             <div class="admin-section">
                 <h2>Weekly Theme</h2>
                 <p style="color: #666666; margin-bottom: 15px;">
-                    Week: <strong>${currentWeek}</strong><br>
+                    Week: <strong>${currentWeek}</strong>${christmasThisWeek ? ' <span class="admin-christmas-tag">Christmas week</span>' : ''}<br>
                     Current theme: ${weekTheme ? `<strong>${escapeHtml(weekTheme.text)}</strong>` : '<em>None set</em>'}
                 </p>
                 <button class="btn btn-danger" id="clear-theme-btn" ${!weekTheme ? 'disabled' : ''}>
                     Clear Theme
                 </button>
                 <div id="clear-theme-message" style="margin-top: 10px;"></div>
+            </div>
+
+            <div class="admin-section">
+                <h2>Christmas &amp; next week</h2>
+                <p style="color: #666666; margin-bottom: 15px;">
+                    Next week (<strong>${escapeHtml(nextWeek)}</strong>)${christmasNextWeek ? ' — Christmas week' : ''}:<br>
+                    ${nextWeekTheme ? `<strong>${escapeHtml(nextWeekTheme.text)}</strong>` : '<em>Theme not generated yet</em>'}
+                </p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="button" class="btn" id="preview-next-week-btn" style="background: #c41e3a;">
+                        Preview next week
+                    </button>
+                    <button type="button" class="btn btn-secondary" id="replay-christmas-intro-btn" ${christmasThisWeek && weekTheme ? '' : 'disabled'}>
+                        Replay this week&apos;s intro
+                    </button>
+                </div>
+                <p style="color: #666666; margin-top: 12px; font-size: 0.9rem;">
+                    <strong>Preview next week</strong> saves next Friday&apos;s theme to the shared data, then plays the Christmas intro and theme card on this browser only.
+                    <strong>Replay intro</strong> clears your &ldquo;seen&rdquo; flag for this week and runs the intro again (Christmas weeks only).
+                </p>
+                <div id="christmas-preview-message" style="margin-top: 10px;"></div>
             </div>
 
             ${renderHarryHillPhotoExamples()}
@@ -3005,7 +3202,7 @@ async function setupAdminPage() {
                 showMessage('game-day-message', 'It\'s already Friday — game day is open automatically.', 'info');
                 return;
             }
-            if (!confirm('Enable submissions and theme of the week for today? Everyone will be able to play as if it were Friday.')) {
+            if (!confirm('Enable the full game day for today? Submissions, theme, guesses, and results (midday/4pm) will all run on today\'s date instead of Friday.')) {
                 return;
             }
             enableGameDayBtn.disabled = true;
@@ -3019,7 +3216,7 @@ async function setupAdminPage() {
                 currentWeekTheme = await Storage.ensureWeekTheme();
                 localStorage.removeItem(`themePopupSeen_${Storage.getCurrentWeek()}`);
                 showThemePopupIfNeeded();
-                showMessage('game-day-message', `Game day enabled for ${result.day}. Theme and submissions are now open.`, 'success');
+                showMessage('game-day-message', `Game day enabled for ${result.day}. Theme, submissions, and results now use today.`, 'success');
                 setTimeout(async () => {
                     await renderPage('admin');
                 }, 1000);
@@ -3029,6 +3226,43 @@ async function setupAdminPage() {
                 enableGameDayBtn.disabled = false;
                 enableGameDayBtn.textContent = 'Enable Game Day Today';
             }
+        });
+    }
+
+    const previewNextWeekBtn = document.getElementById('preview-next-week-btn');
+    if (previewNextWeekBtn) {
+        previewNextWeekBtn.addEventListener('click', async () => {
+            previewNextWeekBtn.disabled = true;
+            try {
+                const next = Storage.getNextWeekKey();
+                const theme = await Storage.ensureWeekTheme(next);
+                if (isChristmasWeek(next)) {
+                    showChristmasIntroIfNeeded({ week: next, theme, force: true });
+                } else {
+                    showHarryThemePreviewModal(next, theme);
+                }
+                showMessage('christmas-preview-message', `Previewing week ${next}. Theme saved for when that week starts.`, 'success');
+            } catch (error) {
+                showMessage('christmas-preview-message', 'Error: ' + error.message, 'error');
+            } finally {
+                previewNextWeekBtn.disabled = false;
+            }
+        });
+    }
+
+    const replayChristmasIntroBtn = document.getElementById('replay-christmas-intro-btn');
+    if (replayChristmasIntroBtn) {
+        replayChristmasIntroBtn.addEventListener('click', async () => {
+            const week = Storage.getCurrentWeek();
+            const theme = await Storage.getWeekTheme(week) || await Storage.ensureWeekTheme(week);
+            if (!theme) {
+                showMessage('christmas-preview-message', 'No theme for this week yet.', 'error');
+                return;
+            }
+            localStorage.removeItem(`themePopupSeen_${week}`);
+            currentWeekTheme = theme;
+            showChristmasIntroIfNeeded({ week, theme, force: true });
+            showMessage('christmas-preview-message', 'Replay started on this device.', 'info');
         });
     }
 

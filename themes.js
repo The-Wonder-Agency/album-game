@@ -69,6 +69,17 @@ const ThemeGenerator = {
         'genre'
     ],
 
+    CHRISTMAS_THEME_IDS: [
+        'christmas_album',
+        'christmas_dinner_cooking',
+        'christmas_present_gift',
+        'winter_snow_ice_title',
+        'feels_like_christmas',
+        'boxing_day_play',
+        'red_green_cover',
+        'relatives_arrive'
+    ],
+
     COMMON_THEME_WEIGHT: 7,
     RARE_THEME_WEIGHT: 1,
 
@@ -118,6 +129,51 @@ const ThemeGenerator = {
 
     pickRandomInt(min, max) {
         return Math.floor(Math.random() * (max - min + 1)) + min;
+    },
+
+    getLastFridayOfNovember(year) {
+        for (let day = 30; day >= 1; day--) {
+            const dt = new Date(year, 10, day);
+            if (dt.getDay() === 5) return day;
+        }
+        return 0;
+    },
+
+    isChristmasWeekKey(weekKey) {
+        const [d, m, y] = weekKey.split('/').map(Number);
+        if (m === 12) return true;
+        if (m === 11) return d === this.getLastFridayOfNovember(y);
+        return false;
+    },
+
+    getChristmasSeasonYear(weekKey) {
+        if (!this.isChristmasWeekKey(weekKey)) return null;
+        const [, , y] = weekKey.split('/').map(Number);
+        return y;
+    },
+
+    getPriorChristmasWeekKeys(themes, currentWeekKey) {
+        const seasonYear = this.getChristmasSeasonYear(currentWeekKey);
+        if (seasonYear == null) return [];
+        return this.getSortedThemeWeeks(themes)
+            .filter(week => week !== currentWeekKey)
+            .filter(week => {
+                return this.getChristmasSeasonYear(week) === seasonYear && this.isChristmasWeekKey(week);
+            });
+    },
+
+    pickChristmasThemeId(themes, currentWeekKey) {
+        const priorWeeks = this.getPriorChristmasWeekKeys(themes, currentWeekKey);
+        const used = new Set();
+        priorWeeks.forEach(week => {
+            const theme = themes[week];
+            if (theme?.id) used.add(theme.id);
+        });
+        const available = this.CHRISTMAS_THEME_IDS.filter(id => !used.has(id));
+        if (available.length > 0) {
+            return this.pickRandom(available);
+        }
+        return this.pickLeastRecentlyUsedThemeId(this.CHRISTMAS_THEME_IDS, themes, currentWeekKey);
     },
 
     pickWeightedLetter() {
@@ -349,6 +405,22 @@ const ThemeGenerator = {
                 return 'Album by a supergroup';
             case 'album_not_uk_or_us':
                 return 'Album by an artist from a country other than the UK or US';
+            case 'christmas_album':
+                return 'A Christmas album';
+            case 'christmas_dinner_cooking':
+                return 'An album you would play while cooking Christmas dinner';
+            case 'christmas_present_gift':
+                return 'An album you were given as a Christmas present';
+            case 'winter_snow_ice_title':
+                return 'An album with winter, snow, or ice in the title';
+            case 'feels_like_christmas':
+                return 'An album that feels like Christmas even though it isn\'t a Christmas record';
+            case 'boxing_day_play':
+                return 'An album you would play on Boxing Day';
+            case 'red_green_cover':
+                return 'An album with red and green on the cover';
+            case 'relatives_arrive':
+                return 'An album you would put on when the relatives arrive';
             default:
                 return 'Unknown theme';
         }
@@ -381,6 +453,14 @@ const ThemeGenerator = {
     },
 
     generateTheme(themes = {}, currentWeekKey = '', teamMembers = []) {
+        if (this.isChristmasWeekKey(currentWeekKey)) {
+            const id = this.pickChristmasThemeId(themes, currentWeekKey);
+            return {
+                id,
+                params: {},
+                text: this.buildText(id, {})
+            };
+        }
         const id = this.pickThemeId(themes, currentWeekKey, teamMembers);
         const params = this.generateParams(id, teamMembers);
         return {
