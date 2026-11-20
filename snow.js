@@ -1,250 +1,309 @@
-// Falling snow — intensity ramps with time on page until blizzard; piles at bottom
+// Christmas snow: light fall → 2 min blizzard; pile reaches full drift by 3 min.
 
 const Snow = {
     canvas: null,
     ctx: null,
+    veil: null,
     flakes: [],
-    groundCols: [],
+    cols: [],
+    colStep: 20,
     animationId: null,
     running: false,
     startedAt: null,
-    veil: null,
-    BLIZZARD_MS: 3 * 60 * 1000,
-    COL_WIDTH: 12,
-    MAX_PILE_PX: 600,
+
+    BLIZZARD_MS: 2 * 60 * 1000,
+    PILE_FILL_MS: 2 * 60 * 1000,
+    MAX_FLAKES: 260,
+
+    SNOW_FILL: 'rgba(250, 252, 255, 0.88)',
+    SNOW_EDGE: 'rgba(210, 222, 232, 0.72)',
+    AIR_FLAKE_FILL: 'rgba(255, 255, 255, 0.95)',
+
+    w() {
+        return this.canvas ? this.canvas.width : window.innerWidth;
+    },
+
+    h() {
+        return this.canvas ? this.canvas.height : window.innerHeight;
+    },
+
+    blizzardT() {
+        if (!this.startedAt) return 0;
+        const t = (performance.now() - this.startedAt) / this.BLIZZARD_MS;
+        return t < 0 ? 0 : t > 1 ? 1 : t;
+    },
+
+    /** Gentle flurries early → whiteout by minute 2. */
+    blizzardPower() {
+        const t = this.blizzardT();
+        return t * t * t;
+    },
+
+    intensity() {
+        return this.blizzardPower();
+    },
+
+    /** 0→1 over PILE_FILL_MS — drifts may grow to full height when this hits 1. */
+    pileFill() {
+        if (!this.startedAt) return 0;
+        const t = (performance.now() - this.startedAt) / this.PILE_FILL_MS;
+        const linear = t < 0 ? 0 : t > 1 ? 1 : t;
+        return linear * linear * (3 - 2 * linear);
+    },
+
+    pileHeightCap() {
+        return this.maxPile() * this.pileFill();
+    },
+
+    maxPile() {
+        return this.h() * 0.75;
+    },
 
     start() {
         if (this.running) return;
         this.startedAt = performance.now();
-        this.ensureCanvas();
-        this.ensureVeil();
-        this.running = true;
-        this.spawnFlakes(8);
-        this.animate();
-    },
-
-    ensureCanvas() {
-        if (this.canvas) return;
-        this.canvas = document.createElement('canvas');
-        this.canvas.id = 'snow-canvas';
-        this.canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1001;';
-        document.body.appendChild(this.canvas);
-        this.ctx = this.canvas.getContext('2d');
+        this.flakes = [];
+        this.cols = [];
+        this.ensureDom();
         this.resize();
-        window.addEventListener('resize', () => this.resize());
+        this.running = true;
+        for (let i = 0; i < 8; i++) this.spawnFlake(0);
+        this.tick();
     },
 
-    ensureVeil() {
-        if (this.veil) return;
-        this.veil = document.createElement('div');
-        this.veil.id = 'snow-veil';
-        this.veil.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:1000;background:white;opacity:0;transition:opacity 1.2s ease;';
-        document.body.appendChild(this.veil);
+    stop() {
+        this.running = false;
+        if (this.animationId != null) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        if (this._resizeBound) {
+            window.removeEventListener('resize', this._resizeBound);
+            this._resizeBound = null;
+        }
+        this.canvas?.remove();
+        this.veil?.remove();
+        this.canvas = null;
+        this.ctx = null;
+        this.veil = null;
+        this.flakes = [];
+        this.cols = [];
+        this.startedAt = null;
     },
 
-    initGround() {
-        const w = this.canvas?.width || window.innerWidth;
-        const cols = Math.ceil(w / this.COL_WIDTH) + 2;
-        const prev = this.groundCols;
-        this.groundCols = new Array(cols).fill(0);
-        if (prev.length && prev.length !== cols) {
-            const ratio = cols / prev.length;
-            for (let i = 0; i < cols; i++) {
-                const src = Math.min(prev.length - 1, Math.floor(i / ratio));
-                this.groundCols[i] = prev[src] || 0;
-            }
+    ensureDom() {
+        if (!this.canvas) {
+            this.canvas = document.createElement('canvas');
+            this.canvas.id = 'snow-canvas';
+            this.canvas.style.cssText =
+                'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:1001;';
+            document.body.appendChild(this.canvas);
+            this.ctx = this.canvas.getContext('2d', { alpha: true });
+        }
+        if (!this.veil) {
+            this.veil = document.createElement('div');
+            this.veil.id = 'snow-veil';
+            this.veil.style.cssText =
+                'position:fixed;inset:0;pointer-events:none;z-index:1000;background:#fff;opacity:0;';
+            document.body.appendChild(this.veil);
+        }
+        if (!this._resizeBound) {
+            this._resizeBound = () => this.resize();
+            window.addEventListener('resize', this._resizeBound);
         }
     },
 
     resize() {
         if (!this.canvas) return;
-        this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight;
-        this.initGround();
-    },
-
-    intensity() {
-        if (!this.startedAt) return 0;
-        const t = performance.now() - this.startedAt;
-        return Math.min(1, t / this.BLIZZARD_MS);
-    },
-
-    maxPileHeight() {
-        return 18 + this.intensity() * this.MAX_PILE_PX;
-    },
-
-    pileHeightAt(x) {
-        if (!this.groundCols.length) return 0;
-        const idx = x / this.COL_WIDTH;
-        const i0 = Math.max(0, Math.floor(idx));
-        const i1 = Math.min(this.groundCols.length - 1, i0 + 1);
-        const t = idx - i0;
-        const h0 = this.groundCols[i0] || 0;
-        const h1 = this.groundCols[i1] || 0;
-        return h0 * (1 - t) + h1 * t;
-    },
-
-    depositSnow(x, amount) {
-        if (!this.groundCols.length) return;
-        const i = Math.floor(x / this.COL_WIDTH);
-        if (i < 0 || i >= this.groundCols.length) return;
-        const cap = this.maxPileHeight();
-        const add = amount;
-        this.groundCols[i] = Math.min(cap, this.groundCols[i] + add);
-        const spill = add * 0.35;
-        if (i > 0) {
-            this.groundCols[i - 1] = Math.min(cap, this.groundCols[i - 1] + spill * 0.45);
-        }
-        if (i < this.groundCols.length - 1) {
-            this.groundCols[i + 1] = Math.min(cap, this.groundCols[i + 1] + spill * 0.45);
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        this.canvas.width = width;
+        this.canvas.height = height;
+        const n = Math.max(12, Math.ceil(width / this.colStep));
+        if (this.cols.length === n) return;
+        const prev = this.cols;
+        this.cols = new Array(n).fill(0);
+        if (!prev.length) return;
+        for (let i = 0; i < n; i++) {
+            const src = Math.min(prev.length - 1, Math.round((i / (n - 1)) * (prev.length - 1)));
+            this.cols[i] = Math.min(this.maxPile(), prev[src] || 0);
         }
     },
 
-    smoothGround() {
-        if (this.groundCols.length < 3) return;
-        const next = this.groundCols.slice();
-        for (let i = 1; i < this.groundCols.length - 1; i++) {
-            next[i] = (this.groundCols[i - 1] + this.groundCols[i] * 2 + this.groundCols[i + 1]) / 4;
+    columnHeightAt(x) {
+        const w = this.w();
+        const n = this.cols.length;
+        if (n < 2) return 0;
+        const pos = (Math.max(0, Math.min(w, x)) / w) * (n - 1);
+        const i0 = Math.floor(pos);
+        const i1 = Math.min(n - 1, i0 + 1);
+        const t = pos - i0;
+        return this.cols[i0] * (1 - t) + this.cols[i1] * t;
+    },
+
+    /** Wavy drift outline (visual only; flakes always land at y = h). */
+    pileY(x) {
+        const height = this.h();
+        const base = height - this.columnHeightAt(x);
+        if (base >= height - 0.5) return height;
+
+        const intense = this.intensity();
+        const phase = this.startedAt * 0.00001;
+        const t = performance.now() * 0.0001;
+        const amp = Math.min(22, 3 + this.columnHeightAt(x) * 0.06);
+        const bump =
+            Math.sin(x * 0.008 + t) * amp * 0.5 +
+            Math.sin(x * 0.021 - t * 1.2 + phase) * amp * 0.35 +
+            Math.sin(x * 0.05 + t * 0.7) * amp * (0.15 + intense * 0.1);
+
+        return base - bump;
+    },
+
+    targetFlakeCount() {
+        const power = this.blizzardPower();
+        const tail = this.blizzardT() > 0.85 ? 1 + (this.blizzardT() - 0.85) * 6 : 1;
+        return Math.min(this.MAX_FLAKES + 40, Math.floor(4 + power * (this.MAX_FLAKES - 4) * tail));
+    },
+
+    spawnFlake(power) {
+        const w = this.w();
+        const sky = power > 0.2 ? Math.random() * (60 + 220 * power) : 0;
+        const streak = power > 0.75 && Math.random() < 0.35;
+        this.flakes.push({
+            x: Math.random() * w,
+            y: -6 - Math.random() * (35 + sky),
+            r: streak ? 1.5 + power * 2.5 : 1.1 + Math.random() * 2 + power * 6.5,
+            vy: 0.32 + Math.random() * 0.45 + power * 6.5,
+            vx: (Math.random() - 0.5) * (0.3 + power * 1.6),
+            phase: Math.random() * 6.28
+        });
+    },
+
+    deposit(x, radius) {
+        const intense = this.intensity();
+        const fill = this.pileFill();
+        const heightCap = this.pileHeightCap();
+        if (heightCap < 0.5) return;
+
+        const n = this.cols.length;
+        if (!n) this.resize();
+        let maxCol = 0;
+        for (let i = 0; i < n; i++) if (this.cols[i] > maxCol) maxCol = this.cols[i];
+
+        const behind = heightCap > 1 ? Math.max(1, heightCap / Math.max(1, maxCol)) : 1;
+        const catchUp = Math.min(2.4, 0.75 + behind * 0.35);
+        const rate = (0.2 + fill * 0.75) * (0.45 + Math.max(intense, fill) * 0.55) * catchUp;
+        const amount = (radius * 0.16 + 0.07) * rate;
+        if (amount <= 0) return;
+
+        const w = this.w();
+        const centre = Math.round((Math.max(0, Math.min(w, x)) / w) * (n - 1));
+        const spread = 3;
+        for (let d = -spread; d <= spread; d++) {
+            const i = centre + d;
+            if (i < 0 || i >= n) continue;
+            const weight = 1 - Math.abs(d) / (spread + 1);
+            const add = amount * weight;
+            this.cols[i] = Math.min(heightCap, Math.min(this.maxPile(), this.cols[i] + add));
         }
-        this.groundCols = next;
     },
 
     drawPile() {
         const ctx = this.ctx;
-        const w = this.canvas.width;
-        const h = this.canvas.height;
-        const cw = this.COL_WIDTH;
-        if (!this.groundCols.some(v => v > 0.5)) return;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(0, h);
-        for (let i = 0; i < this.groundCols.length; i++) {
-            const x = i * cw;
-            const pileTop = h - this.groundCols[i];
-            ctx.lineTo(x, pileTop);
+        const w = this.w();
+        const height = this.h();
+        let maxCol = 0;
+        for (let i = 0; i < this.cols.length; i++) {
+            if (this.cols[i] > maxCol) maxCol = this.cols[i];
         }
-        ctx.lineTo(w, h);
+        if (maxCol < 1) return;
+
+        const step = 6;
+        ctx.beginPath();
+        ctx.moveTo(0, height);
+        for (let x = 0; x <= w; x += step) {
+            ctx.lineTo(x, this.pileY(x));
+        }
+        ctx.lineTo(w, height);
         ctx.closePath();
-
-        const grad = ctx.createLinearGradient(0, h - this.maxPileHeight(), 0, h);
-        grad.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
-        grad.addColorStop(0.4, 'rgba(248, 252, 255, 0.95)');
-        grad.addColorStop(1, 'rgba(230, 238, 245, 0.92)');
-        ctx.fillStyle = grad;
+        ctx.fillStyle = this.SNOW_FILL;
         ctx.fill();
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        for (let i = 0; i < this.groundCols.length; i++) {
-            const x = i * cw;
-            const pileTop = h - this.groundCols[i];
-            if (i === 0) ctx.moveTo(x, pileTop);
-            else ctx.lineTo(x, pileTop);
-        }
+        ctx.strokeStyle = this.SNOW_EDGE;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
-        ctx.restore();
     },
 
-    spawnFlakes(count) {
-        const w = this.canvas?.width || window.innerWidth;
-        const intense = this.intensity();
-        for (let i = 0; i < count; i++) {
-            const sizeBase = 1.5 + intense * 5;
-            this.flakes.push({
-                x: Math.random() * w,
-                y: -10 - Math.random() * 40,
-                r: sizeBase + Math.random() * (2 + intense * 4),
-                vy: 0.6 + Math.random() * (1.2 + intense * 3.5),
-                vx: (Math.random() - 0.5) * (0.3 + intense * 2.2),
-                wobble: Math.random() * Math.PI * 2,
-                wobbleSpeed: 0.02 + Math.random() * 0.04,
-                opacity: 0.5 + Math.random() * 0.5
-            });
+    drawFlakes(flakeList, fill) {
+        const ctx = this.ctx;
+        ctx.fillStyle = fill;
+        for (const f of flakeList) {
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, f.r, 0, 6.283);
+            ctx.fill();
         }
     },
 
-    animate() {
-        if (!this.ctx || !this.canvas || !this.running) return;
+    tick() {
+        if (!this.running || !this.ctx) return;
 
-        const intense = this.intensity();
+        const power = this.blizzardPower();
+        const t = this.blizzardT();
+        const w = this.w();
+        const height = this.h();
+        const target = this.targetFlakeCount();
+
         if (this.veil) {
-            const onChristmasPalette = document.body.classList.contains('christmas-season');
-            const veilMax = onChristmasPalette ? 0.22 : 0.55;
-            this.veil.style.opacity = String(intense * veilMax);
+            const maxOpacity = document.body.classList.contains('christmas-season') ? 0.22 : 0.48;
+            const whiteout = power + Math.max(0, t - 0.9) * 4;
+            this.veil.style.opacity = String(Math.min(1, whiteout * maxOpacity));
         }
 
-        const spawnRate = 2 + Math.floor(intense * 14);
-        if (Math.random() < 0.35 + intense * 0.65) {
-            this.spawnFlakes(spawnRate);
+        const deficit = target - this.flakes.length;
+        const spawnChance = 0.28 + power * 0.72;
+        if (deficit > 0 && Math.random() < spawnChance) {
+            let batch = 1 + Math.floor(power * 14);
+            if (t >= 0.9) batch += 2 + Math.floor(Math.random() * 4);
+            batch = Math.min(deficit, batch);
+            for (let i = 0; i < batch; i++) this.spawnFlake(power);
         }
 
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.clearRect(0, 0, w, height);
 
-        const wind = (Math.sin(performance.now() / 1200) * 0.4 + intense * 1.8);
-        const h = this.canvas.height;
+        const gust =
+            Math.sin(performance.now() / 900) * 1.1 +
+            Math.sin(performance.now() / 520) * 0.65 +
+            Math.sin(performance.now() / 2100) * 0.4;
+        const wind = gust * (0.15 + power * 5.5);
+        const still = [];
 
-        const surviving = [];
         for (const f of this.flakes) {
-            f.wobble += f.wobbleSpeed;
-            f.x += f.vx + wind + Math.sin(f.wobble) * (0.2 + intense);
             f.y += f.vy;
+            const swirl = Math.sin(f.phase + performance.now() * (0.002 + power * 0.004)) * (0.15 + power * 0.35);
+            f.x += f.vx + wind + swirl;
+            if (f.x < 0) f.x += w;
+            if (f.x > w) f.x -= w;
 
-            const surface = h - this.pileHeightAt(f.x);
-            if (f.y + f.r >= surface) {
-                this.depositSnow(f.x, f.r * 0.65 + 0.2);
+            if (f.y + f.r >= height) {
+                this.deposit(f.x, f.r);
                 continue;
             }
-
-            if (f.y < h + 30 && f.x > -40 && f.x < this.canvas.width + 40) {
-                surviving.push(f);
-            }
+            if (f.y < height + 20) still.push(f);
         }
-        this.flakes = surviving;
+        this.flakes = still;
 
-        if (Math.random() < 0.15 + intense * 0.2) {
-            this.smoothGround();
+        const inAir = [];
+        const intoPile = [];
+        for (const f of this.flakes) {
+            const surface = this.pileY(f.x);
+            if (f.y - f.r >= surface) continue;
+            if (f.y + f.r <= surface) inAir.push(f);
+            else intoPile.push(f);
         }
 
+        this.drawFlakes(inAir, this.AIR_FLAKE_FILL);
+        this.drawFlakes(intoPile, this.SNOW_FILL);
         this.drawPile();
 
-        this.flakes.forEach(f => {
-            this.ctx.save();
-            this.ctx.shadowColor = 'rgba(30, 50, 55, 0.45)';
-            this.ctx.shadowBlur = Math.max(2, f.r * 0.8);
-            this.ctx.beginPath();
-            this.ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
-            this.ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1, f.opacity + 0.15)})`;
-            this.ctx.fill();
-            this.ctx.restore();
-        });
-
-        const maxFlakes = 400 + Math.floor(intense * 1200);
-        if (this.flakes.length > maxFlakes) {
-            this.flakes = this.flakes.slice(-maxFlakes);
-        }
-
-        this.animationId = requestAnimationFrame(() => this.animate());
-    },
-
-    stop() {
-        this.running = false;
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-        if (this.canvas) {
-            this.canvas.remove();
-            this.canvas = null;
-            this.ctx = null;
-        }
-        if (this.veil) {
-            this.veil.remove();
-            this.veil = null;
-        }
-        this.flakes = [];
-        this.groundCols = [];
-        this.startedAt = null;
+        this.animationId = requestAnimationFrame(() => this.tick());
     }
 };

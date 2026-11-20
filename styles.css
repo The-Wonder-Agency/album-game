@@ -732,6 +732,17 @@ main {
     margin: 0 0 12px;
 }
 
+.theme-preview-submit-note {
+    text-align: center;
+    font-size: 0.9rem;
+    color: #666;
+    margin: -12px 0 20px;
+}
+
+body.christmas-season .theme-preview-submit-note {
+    color: rgba(255, 255, 255, 0.9);
+}
+
 .theme-noddy {
     object-fit: cover;
     object-position: center 15%;

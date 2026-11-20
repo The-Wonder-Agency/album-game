@@ -43,12 +43,78 @@ function applyChristmasTitle() {
     applyChristmasSeasonTheme();
 }
 
-function maybeStartChristmasAmbient(weekKey = Storage.getCurrentWeek()) {
-    if (!isChristmasWeek(weekKey)) return;
-    const seenKey = `themePopupSeen_${weekKey}`;
-    if (localStorage.getItem(seenKey) && typeof Snow !== 'undefined') {
-        applyChristmasTitle();
-        Snow.start();
+const THEME_BANNER_PREVIEW_WEEK_KEY = 'themeBannerPreviewWeek';
+const CHRISTMAS_AMBIENT_PREVIEW_WEEK_KEY = 'christmasAmbientPreviewWeek';
+
+function getThemeBannerPreviewWeek() {
+    return sessionStorage.getItem(THEME_BANNER_PREVIEW_WEEK_KEY);
+}
+
+function getThemeBannerWeek() {
+    return getThemeBannerPreviewWeek() || Storage.getCurrentWeek();
+}
+
+function setThemeBannerPreview(week, theme) {
+    currentWeekTheme = theme;
+    sessionStorage.setItem(THEME_BANNER_PREVIEW_WEEK_KEY, week);
+}
+
+function clearThemeBannerPreview() {
+    sessionStorage.removeItem(THEME_BANNER_PREVIEW_WEEK_KEY);
+}
+
+function getChristmasAmbientPreviewWeek() {
+    return sessionStorage.getItem(CHRISTMAS_AMBIENT_PREVIEW_WEEK_KEY);
+}
+
+function clearChristmasAmbientPreview() {
+    sessionStorage.removeItem(CHRISTMAS_AMBIENT_PREVIEW_WEEK_KEY);
+}
+
+function isChristmasPresentationActive() {
+    const liveWeek = Storage.getCurrentWeek();
+    if (isChristmasWeek(liveWeek) && localStorage.getItem(`themePopupSeen_${liveWeek}`)) {
+        return true;
+    }
+    const ambientPreviewWeek = getChristmasAmbientPreviewWeek();
+    if (
+        ambientPreviewWeek &&
+        isChristmasWeek(ambientPreviewWeek) &&
+        localStorage.getItem(`themePopupSeen_${ambientPreviewWeek}`)
+    ) {
+        return true;
+    }
+    return false;
+}
+
+function revertChristmasPresentation() {
+    document.title = GAME_SHOW_TITLE;
+    const h1 = document.querySelector('header h1');
+    if (h1) h1.textContent = GAME_SHOW_TITLE;
+    document.body.classList.remove('christmas-season');
+    if (typeof Snow !== 'undefined') Snow.stop();
+}
+
+/** Live Christmas week, or this browser after finishing a Christmas admin preview intro (same tab). */
+function syncChristmasPresentation() {
+    if (!isChristmasPresentationActive()) {
+        revertChristmasPresentation();
+        return;
+    }
+    applyChristmasTitle();
+    if (typeof Snow !== 'undefined') Snow.start();
+}
+
+function enableChristmasPreviewAmbient(week) {
+    if (isChristmasWeek(week)) {
+        sessionStorage.setItem(CHRISTMAS_AMBIENT_PREVIEW_WEEK_KEY, week);
+    }
+    syncChristmasPresentation();
+}
+
+async function refreshSubmitPageIfActive() {
+    if (currentPage === 'submit') {
+        await renderPage('submit');
     }
 }
 
@@ -202,13 +268,16 @@ async function initializeApp() {
 
     // Ensure weekly theme exists and show popup only on game day (Friday or admin override)
     try {
-        if (await Storage.isGameDay()) {
+        const previewWeek = getThemeBannerPreviewWeek();
+        if (previewWeek) {
+            currentWeekTheme = await Storage.getWeekTheme(previewWeek);
+        } else if (await Storage.isGameDay()) {
             currentWeekTheme = await Storage.ensureWeekTheme();
             showThemePopupIfNeeded();
         } else {
             currentWeekTheme = await Storage.getWeekTheme();
         }
-        maybeStartChristmasAmbient();
+        syncChristmasPresentation();
     } catch (error) {
         console.error('Error loading weekly theme:', error);
     }
@@ -669,7 +738,10 @@ function showHarryThemePreviewModal(week, theme) {
     const card = document.getElementById('theme-modal-card');
     const rect = card.getBoundingClientRect();
     Confetti.burst(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    document.getElementById('theme-modal-dismiss').addEventListener('click', () => backdrop.remove());
+    document.getElementById('theme-modal-dismiss').addEventListener('click', () => {
+        backdrop.remove();
+        void refreshSubmitPageIfActive();
+    });
 }
 
 function showChristmasThemeCard(week, theme) {
@@ -693,6 +765,16 @@ function showChristmasThemeCard(week, theme) {
     document.getElementById('theme-modal-dismiss').addEventListener('click', () => {
         localStorage.setItem(seenKey, 'true');
         backdrop.remove();
+        if (week === Storage.getCurrentWeek()) {
+            clearChristmasAmbientPreview();
+            syncChristmasPresentation();
+        } else if (isChristmasWeek(week)) {
+            enableChristmasPreviewAmbient(week);
+        } else {
+            clearChristmasAmbientPreview();
+            revertChristmasPresentation();
+        }
+        void refreshSubmitPageIfActive();
     });
 }
 
@@ -700,6 +782,9 @@ function showChristmasIntroIfNeeded(opts = {}) {
     const week = opts.week || Storage.getCurrentWeek();
     const theme = opts.theme || currentWeekTheme;
     if (!theme) return;
+    if (opts.force || week !== Storage.getCurrentWeek()) {
+        setThemeBannerPreview(week, theme);
+    }
     if (document.getElementById('christmas-intro-backdrop') || document.getElementById('theme-modal-backdrop')) return;
 
     const seenKey = `themePopupSeen_${week}`;
@@ -910,11 +995,10 @@ function buildAudienceBarsHtml(names, weights) {
     return `<div class="audience-bars">${rows}</div>`;
 }
 
-function renderThemeBanner() {
+function renderThemeBanner(weekKey = getThemeBannerWeek()) {
     if (!currentWeekTheme) return '';
-    const week = Storage.getCurrentWeek();
-    if (isChristmasWeek(week)) {
-        const noddySrc = pickNoddyImage(week);
+    if (isChristmasWeek(weekKey)) {
+        const noddySrc = pickNoddyImage(weekKey);
         return `
         <div class="theme-banner theme-banner--christmas">
             <img src="${escapeAttr(noddySrc)}" alt="Noddy Holder" class="theme-noddy theme-noddy--banner">
@@ -1205,6 +1289,8 @@ async function renderPage(page) {
 async function renderSubmitPage() {
     const week = Storage.getCurrentWeek();
     const isGameDay = await Storage.isGameDay(week);
+    const themeWeek = getThemeBannerWeek();
+    const showThemeBanner = isGameDay || !!getThemeBannerPreviewWeek();
     const submissions = await Storage.getSubmissions(week);
     const members = await Storage.getTeamMembers();
     const userSubmissions = submissions.filter(s => s.submitter === currentGuesser);
@@ -1216,13 +1302,21 @@ async function renderSubmitPage() {
         } catch (error) {
             console.error('Error ensuring weekly theme:', error);
         }
+    } else if (showThemeBanner) {
+        const saved = await Storage.getWeekTheme(themeWeek);
+        if (saved) currentWeekTheme = saved;
     }
 
     return `
         <div class="page active">
             ${previewModeBanner()}
             <h2 class="page-title">Submit Albums</h2>
-            ${isGameDay ? renderThemeBanner() : ''}
+            ${showThemeBanner ? renderThemeBanner(themeWeek) : ''}
+            ${showThemeBanner && !isGameDay ? `
+                <p class="theme-preview-submit-note" role="status">
+                    Theme preview for week <strong>${escapeHtml(themeWeek)}</strong> (admin). Submissions still open on game day only.
+                </p>
+            ` : ''}
             ${!isGameDay ? `
                 <div class="alert alert-info">
                     <p>Album submissions open on Friday. An admin can enable game day early if you&rsquo;re playing on a different day this week.</p>
@@ -2883,6 +2977,11 @@ async function renderAdminPage() {
                     <strong>Replay intro</strong> clears your &ldquo;seen&rdquo; flag for this week and runs the intro again (Christmas weeks only).
                 </p>
                 <div id="christmas-preview-message" style="margin-top: 10px;"></div>
+                ${getThemeBannerPreviewWeek() ? `
+                    <button type="button" class="btn btn-secondary" id="clear-theme-preview-btn" style="margin-top: 10px;">
+                        Clear theme preview (this browser)
+                    </button>
+                ` : ''}
             </div>
 
             ${renderHarryHillPhotoExamples()}
@@ -3236,6 +3335,8 @@ async function setupAdminPage() {
             try {
                 const next = Storage.getNextWeekKey();
                 const theme = await Storage.ensureWeekTheme(next);
+                setThemeBannerPreview(next, theme);
+                await refreshSubmitPageIfActive();
                 if (isChristmasWeek(next)) {
                     showChristmasIntroIfNeeded({ week: next, theme, force: true });
                 } else {
@@ -3250,6 +3351,21 @@ async function setupAdminPage() {
         });
     }
 
+    const clearThemePreviewBtn = document.getElementById('clear-theme-preview-btn');
+    if (clearThemePreviewBtn) {
+        clearThemePreviewBtn.addEventListener('click', async () => {
+            clearThemeBannerPreview();
+            clearChristmasAmbientPreview();
+            currentWeekTheme = await Storage.getWeekTheme(Storage.getCurrentWeek());
+            syncChristmasPresentation();
+            await refreshSubmitPageIfActive();
+            showMessage('christmas-preview-message', 'Theme preview cleared.', 'info');
+            setTimeout(async () => {
+                await renderPage('admin');
+            }, 800);
+        });
+    }
+
     const replayChristmasIntroBtn = document.getElementById('replay-christmas-intro-btn');
     if (replayChristmasIntroBtn) {
         replayChristmasIntroBtn.addEventListener('click', async () => {
@@ -3260,8 +3376,9 @@ async function setupAdminPage() {
                 return;
             }
             localStorage.removeItem(`themePopupSeen_${week}`);
-            currentWeekTheme = theme;
+            setThemeBannerPreview(week, theme);
             showChristmasIntroIfNeeded({ week, theme, force: true });
+            await refreshSubmitPageIfActive();
             showMessage('christmas-preview-message', 'Replay started on this device.', 'info');
         });
     }
