@@ -9,7 +9,12 @@ const Snow = {
     colStep: 20,
     animationId: null,
     running: false,
-    startedAt: null,
+    accumulatedMs: 0,
+    sessionStartedAt: null,
+    _saveTimer: null,
+    _persistBound: null,
+
+    STORAGE_PREFIX: 'christmasSnow_',
 
     BLIZZARD_MS: 2 * 60 * 1000,
     PILE_FILL_MS: 2 * 60 * 1000,
@@ -27,9 +32,39 @@ const Snow = {
         return this.canvas ? this.canvas.height : window.innerHeight;
     },
 
+    weekKey() {
+        if (typeof Storage === 'undefined' || !Storage.getCurrentWeek) return null;
+        const live = Storage.getCurrentWeek();
+        const seen = (w) => localStorage.getItem(`themePopupSeen_${w}`);
+        if (
+            typeof ThemeGenerator !== 'undefined' &&
+            ThemeGenerator.isChristmasWeekKey(live) &&
+            seen(live)
+        ) {
+            return live;
+        }
+        const ambient =
+            typeof sessionStorage !== 'undefined'
+                ? sessionStorage.getItem('christmasAmbientPreviewWeek')
+                : null;
+        if (
+            ambient &&
+            typeof ThemeGenerator !== 'undefined' &&
+            ThemeGenerator.isChristmasWeekKey(ambient) &&
+            seen(ambient)
+        ) {
+            return ambient;
+        }
+        return live;
+    },
+
+    elapsedMs() {
+        if (!this.sessionStartedAt) return this.accumulatedMs || 0;
+        return (this.accumulatedMs || 0) + (performance.now() - this.sessionStartedAt);
+    },
+
     blizzardT() {
-        if (!this.startedAt) return 0;
-        const t = (performance.now() - this.startedAt) / this.BLIZZARD_MS;
+        const t = this.elapsedMs() / this.BLIZZARD_MS;
         return t < 0 ? 0 : t > 1 ? 1 : t;
     },
 
@@ -45,10 +80,93 @@ const Snow = {
 
     /** 0→1 over PILE_FILL_MS — drifts may grow to full height when this hits 1. */
     pileFill() {
-        if (!this.startedAt) return 0;
-        const t = (performance.now() - this.startedAt) / this.PILE_FILL_MS;
+        const t = this.elapsedMs() / this.PILE_FILL_MS;
         const linear = t < 0 ? 0 : t > 1 ? 1 : t;
         return linear * linear * (3 - 2 * linear);
+    },
+
+    storageKey() {
+        const week = this.weekKey();
+        return week ? `${this.STORAGE_PREFIX}${week}` : null;
+    },
+
+    loadState() {
+        const key = this.storageKey();
+        if (!key) return null;
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            if (data.week !== this.weekKey()) return null;
+            return data;
+        } catch {
+            return null;
+        }
+    },
+
+    pruneOtherWeeks(keepWeek) {
+        if (!keepWeek) return;
+        const prefix = this.STORAGE_PREFIX;
+        const keep = prefix + keepWeek;
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(prefix) && k !== keep) localStorage.removeItem(k);
+        }
+    },
+
+    applySavedCols(savedCols, refH) {
+        if (!savedCols?.length) return;
+        const n = this.cols.length;
+        if (n < 1) return;
+        const scale = refH > 0 ? this.h() / refH : 1;
+        const cap = this.maxPile();
+        for (let i = 0; i < n; i++) {
+            const src = Math.min(
+                savedCols.length - 1,
+                Math.round((i / Math.max(1, n - 1)) * (savedCols.length - 1))
+            );
+            this.cols[i] = Math.min(cap, (savedCols[src] || 0) * scale);
+        }
+    },
+
+    persist() {
+        const key = this.storageKey();
+        if (!key || !this.running) return;
+        const week = this.weekKey();
+        if (!week) return;
+        const payload = {
+            v: 1,
+            week,
+            elapsedMs: this.elapsedMs(),
+            cols: this.cols.slice(),
+            refH: this.h(),
+            savedAt: Date.now()
+        };
+        try {
+            localStorage.setItem(key, JSON.stringify(payload));
+        } catch {
+            /* quota */
+        }
+    },
+
+    bindPersist() {
+        if (this._persistBound) return;
+        this._persistBound = () => this.persist();
+        window.addEventListener('pagehide', this._persistBound);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') this.persist();
+        });
+    },
+
+    unbindPersist() {
+        if (this._persistBound) {
+            window.removeEventListener('pagehide', this._persistBound);
+            this._persistBound = null;
+        }
+        if (this._saveTimer != null) {
+            clearInterval(this._saveTimer);
+            this._saveTimer = null;
+        }
     },
 
     pileHeightCap() {
@@ -61,22 +179,43 @@ const Snow = {
 
     start() {
         if (this.running) return;
-        this.startedAt = performance.now();
+        const week = this.weekKey();
+        this.pruneOtherWeeks(week);
+
         this.flakes = [];
-        this.cols = [];
         this.ensureDom();
         this.resize();
+
+        const saved = this.loadState();
+        if (saved && saved.week === week) {
+            this.accumulatedMs = Math.max(0, saved.elapsedMs || 0);
+            this.applySavedCols(saved.cols, saved.refH);
+        } else {
+            this.accumulatedMs = 0;
+            this.cols = this.cols.map(() => 0);
+        }
+
+        this._snowWeek = week;
+        this.sessionStartedAt = performance.now();
         this.running = true;
-        for (let i = 0; i < 8; i++) this.spawnFlake(0);
+        this.bindPersist();
+        this._saveTimer = setInterval(() => this.persist(), 4000);
+
+        const power = this.blizzardPower();
+        const spawnCount = Math.min(this.targetFlakeCount(), 6 + Math.floor(power * 24));
+        for (let i = 0; i < spawnCount; i++) this.spawnFlake(power);
+
         this.tick();
     },
 
     stop() {
+        if (this.running) this.persist();
         this.running = false;
         if (this.animationId != null) {
             cancelAnimationFrame(this.animationId);
             this.animationId = null;
         }
+        this.unbindPersist();
         if (this._resizeBound) {
             window.removeEventListener('resize', this._resizeBound);
             this._resizeBound = null;
@@ -88,7 +227,8 @@ const Snow = {
         this.veil = null;
         this.flakes = [];
         this.cols = [];
-        this.startedAt = null;
+        this.accumulatedMs = 0;
+        this.sessionStartedAt = null;
     },
 
     ensureDom() {
@@ -148,7 +288,7 @@ const Snow = {
         if (base >= height - 0.5) return height;
 
         const intense = this.intensity();
-        const phase = this.startedAt * 0.00001;
+        const phase = this.elapsedMs() * 0.00001;
         const t = performance.now() * 0.0001;
         const amp = Math.min(22, 3 + this.columnHeightAt(x) * 0.06);
         const bump =
@@ -245,6 +385,21 @@ const Snow = {
 
     tick() {
         if (!this.running || !this.ctx) return;
+
+        const week = this.weekKey();
+        if (week && this._snowWeek && week !== this._snowWeek) {
+            this.persist();
+            this._snowWeek = week;
+            this.pruneOtherWeeks(week);
+            this.accumulatedMs = 0;
+            this.cols = this.cols.map(() => 0);
+            const next = this.loadState();
+            if (next && next.week === week) {
+                this.accumulatedMs = Math.max(0, next.elapsedMs || 0);
+                this.applySavedCols(next.cols, next.refH);
+            }
+            this.sessionStartedAt = performance.now();
+        }
 
         const power = this.blizzardPower();
         const t = this.blizzardT();
